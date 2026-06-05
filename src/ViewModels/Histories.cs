@@ -87,6 +87,20 @@ namespace SourceGit.ViewModels
             }
         }
 
+        public bool ShowFastForwardedBranchLocations
+        {
+            get => Preferences.Instance.ShowFastForwardedBranchLocationsInGraph;
+            set
+            {
+                if (Preferences.Instance.ShowFastForwardedBranchLocationsInGraph != value)
+                {
+                    Preferences.Instance.ShowFastForwardedBranchLocationsInGraph = value;
+                    OnPropertyChanged();
+                    GenerateGraph(_commits);
+                }
+            }
+        }
+
         public List<Models.Commit> SelectedCommits
         {
             get => _selectedCommits;
@@ -185,6 +199,12 @@ namespace SourceGit.ViewModels
         public void NotifyCurrentBranchChanged()
         {
             OnPropertyChanged(nameof(CurrentBranch));
+            GenerateGraph(_commits);
+        }
+
+        public void NotifyBranchesChanged()
+        {
+            GenerateGraph(_commits);
         }
 
         public Models.BisectState UpdateBisectInfo()
@@ -489,7 +509,15 @@ namespace SourceGit.ViewModels
                     extraHeads.Add(c.SHA);
             }
 
-            Graph = Models.CommitGraph.Generate(commits, commitsChanged, firstParentOnly, highlighting, extraHeads);
+            Graph = Models.CommitGraph.Generate(
+                commits,
+                _repo.Branches,
+                commitsChanged,
+                firstParentOnly,
+                highlighting,
+                extraHeads,
+                ShowFastForwardedBranchLocations,
+                _repo.GetBranchGraphColors());
         }
 
         private Repository _repo = null;

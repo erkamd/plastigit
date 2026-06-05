@@ -24,6 +24,18 @@ namespace SourceGit.Models
             set;
         } = 0;
 
+        public int NextBranchGraphColor
+        {
+            get;
+            set;
+        } = 0;
+
+        public Dictionary<string, int> BranchGraphColors
+        {
+            get;
+            set;
+        } = [];
+
         public string ConventionalTypesOverride
         {
             get;

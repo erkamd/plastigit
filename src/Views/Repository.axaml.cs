@@ -409,6 +409,25 @@ namespace SourceGit.Views
                     ev.Handled = true;
                 };
 
+                var showFastForwardedBranchLocations = new MenuItem();
+                showFastForwardedBranchLocations.Header = "Show fast-forwarded branch locations";
+                if (histories.ShowFastForwardedBranchLocations)
+                    showFastForwardedBranchLocations.Icon = this.CreateMenuIcon("Icons.Check");
+                showFastForwardedBranchLocations.Click += (_, ev) =>
+                {
+                    histories.ShowFastForwardedBranchLocations = !histories.ShowFastForwardedBranchLocations;
+                    ev.Handled = true;
+                };
+
+                var clearUnnecessaryBranches = new MenuItem();
+                clearUnnecessaryBranches.Header = "Clear unnecessary branches";
+                clearUnnecessaryBranches.Icon = this.CreateMenuIcon("Icons.Clear");
+                clearUnnecessaryBranches.Click += (_, ev) =>
+                {
+                    repo.ClearUnnecessaryBranches();
+                    ev.Handled = true;
+                };
+
                 var order = new MenuItem();
                 order.Header = App.Text("Repository.HistoriesOrder");
                 order.IsEnabled = false;
@@ -489,6 +508,8 @@ namespace SourceGit.Views
                 menu.Items.Add(reflog);
                 menu.Items.Add(firstParentOnly);
                 menu.Items.Add(simplifyByDecoration);
+                menu.Items.Add(showFastForwardedBranchLocations);
+                menu.Items.Add(clearUnnecessaryBranches);
                 menu.Items.Add(new MenuItem() { Header = "-" });
                 menu.Items.Add(order);
                 menu.Items.Add(dateOrder);

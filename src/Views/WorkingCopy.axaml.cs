@@ -241,6 +241,21 @@ namespace SourceGit.Views
             e.Handled = true;
         }
 
+        private void OnCommitToNewBranch(object _, RoutedEventArgs e)
+        {
+            if (App.GetLauncher() is { CommandPalette: { } } launcher)
+                return;
+
+            if (DataContext is ViewModels.WorkingCopy vm)
+            {
+                var repo = vm.Repository;
+                if (repo.CanCreatePopup())
+                    repo.ShowPopup(new ViewModels.CommitToNewBranch(vm));
+            }
+
+            e.Handled = true;
+        }
+
         private async void OnCommitWithAutoStage(object _, RoutedEventArgs e)
         {
             if (App.GetLauncher() is { CommandPalette: { } } launcher)

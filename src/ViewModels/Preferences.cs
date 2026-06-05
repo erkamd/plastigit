@@ -223,6 +223,12 @@ namespace SourceGit.ViewModels
             set => SetProperty(ref _useCompactBranchNamesInGraph, value);
         }
 
+        public bool ShowFastForwardedBranchLocationsInGraph
+        {
+            get => _showFastForwardedBranchLocationsInGraph;
+            set => SetProperty(ref _showFastForwardedBranchLocationsInGraph, value);
+        }
+
         public bool UseTwoColumnsLayoutInHistories
         {
             get => _useTwoColumnsLayoutInHistories;
@@ -834,6 +840,7 @@ namespace SourceGit.ViewModels
         private bool _showAuthorTimeInGraph = false;
         private bool _showChildren = false;
         private bool _useCompactBranchNamesInGraph = true;
+        private bool _showFastForwardedBranchLocationsInGraph = false;
 
         private bool _check4UpdatesOnStartup = true;
         private double _lastCheckUpdateTime = 0;

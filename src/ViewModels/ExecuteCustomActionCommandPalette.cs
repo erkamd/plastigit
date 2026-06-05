@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -56,7 +56,7 @@ namespace SourceGit.ViewModels
                     if (l.IsGlobal != r.IsGlobal)
                         return l.IsGlobal ? -1 : 1;
 
-                    return l.Name.CompareTo(r.Name, StringComparison.OrdinalIgnoreCase);
+                    return string.Compare(l.Name, r.Name, StringComparison.OrdinalIgnoreCase);
                 });
 
                 _visibleActions = _actions;

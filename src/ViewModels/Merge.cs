@@ -128,24 +128,15 @@ namespace SourceGit.ViewModels
 
         private Models.MergeMode AutoSelectMergeMode()
         {
-            var config = new Commands.Config(_repo.FullPath).Get($"branch.{Into}.mergeoptions");
-            var mode = config switch
-            {
-                "--ff-only" => Models.MergeMode.FastForward,
-                "--no-ff" => Models.MergeMode.NoFastForward,
-                "--squash" => Models.MergeMode.Squash,
-                "--no-commit" or "--no-ff --no-commit" => Models.MergeMode.DontCommit,
-                _ => null,
-            };
-
-            if (mode != null)
-                return mode;
-
             var preferredMergeModeIdx = _repo.Settings.PreferredMergeMode;
-            if (preferredMergeModeIdx < 0 || preferredMergeModeIdx > Models.MergeMode.Supported.Length)
-                return Models.MergeMode.Default;
+            if (preferredMergeModeIdx < 0 || preferredMergeModeIdx >= Models.MergeMode.Supported.Length)
+                return Models.MergeMode.NoFastForward;
 
-            return Models.MergeMode.Supported[preferredMergeModeIdx];
+            var mode = Models.MergeMode.Supported[preferredMergeModeIdx];
+            if (mode == Models.MergeMode.Default || mode == Models.MergeMode.FastForward)
+                return Models.MergeMode.NoFastForward;
+
+            return mode;
         }
 
         private void Test()

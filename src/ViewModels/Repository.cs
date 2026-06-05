@@ -756,6 +756,62 @@ namespace SourceGit.ViewModels
                 await ShowAndStartPopupAsync(new Cleanup(this));
         }
 
+        public IReadOnlyDictionary<string, int> GetBranchGraphColors()
+        {
+            var changed = false;
+            var alive = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var branch in _branches)
+            {
+                if (branch == null || branch.IsDetachedHead)
+                    continue;
+
+                var key = GetBranchGraphColorKey(branch);
+                if (string.IsNullOrEmpty(key))
+                    continue;
+
+                alive.Add(key);
+                if (!_settings.BranchGraphColors.ContainsKey(key))
+                {
+                    _settings.BranchGraphColors[key] = _settings.NextBranchGraphColor++;
+                    changed = true;
+                }
+            }
+
+            var stale = new List<string>();
+            foreach (var key in _settings.BranchGraphColors.Keys)
+            {
+                if (!alive.Contains(key))
+                    stale.Add(key);
+            }
+
+            foreach (var key in stale)
+            {
+                _settings.BranchGraphColors.Remove(key);
+                changed = true;
+            }
+
+            if (changed)
+                _settings.Save();
+
+            return _settings.BranchGraphColors;
+        }
+
+        public void ClearUnnecessaryBranches()
+        {
+            if (!CanCreatePopup())
+                return;
+
+            var unnecessary = FindUnnecessaryLocalBranches();
+            if (unnecessary.Count == 0)
+            {
+                SendNotification("No unnecessary local branches found.");
+                return;
+            }
+
+            ShowPopup(new DeleteMultipleBranches(this, unnecessary, true));
+        }
+
         public void ClearFilter()
         {
             Filter = string.Empty;
@@ -856,6 +912,7 @@ namespace SourceGit.ViewModels
 
             var newFullName = $"refs/heads/{newName}";
             _uiStates.RenameBranchFilter(b.FullName, newFullName);
+            RenameBranchGraphColor(b.FullName, newFullName);
 
             b.Name = newName;
             b.FullName = newFullName;
@@ -1139,6 +1196,7 @@ namespace SourceGit.ViewModels
                     CurrentBranch = branches.Find(x => x.IsCurrent);
                     LocalBranchTrees = builder.Locals;
                     RemoteBranchTrees = builder.Remotes;
+                    _histories?.NotifyBranchesChanged();
 
                     var localBranchesCount = 0;
                     foreach (var b in branches)
@@ -1429,6 +1487,67 @@ namespace SourceGit.ViewModels
         {
             if (CanCreatePopup())
                 ShowPopup(new DeleteMultipleBranches(this, branches, isLocal));
+        }
+
+        private List<Models.Branch> FindUnnecessaryLocalBranches()
+        {
+            var commits = _histories?.Commits;
+            if (commits == null || commits.Count == 0)
+                return [];
+
+            var unnecessary = new List<Models.Branch>();
+            var branchesWithoutOwnedCommits = Models.CommitGraph.FindBranchesWithoutOwnedCommits(commits, _branches);
+            foreach (var candidate in branchesWithoutOwnedCommits)
+            {
+                if (candidate is not { IsLocal: true, IsDetachedHead: false } ||
+                    candidate.IsCurrent ||
+                    IsProtectedBranch(candidate))
+                    continue;
+
+                unnecessary.Add(candidate);
+            }
+
+            unnecessary.Sort((l, r) => string.Compare(l.FullName, r.FullName, StringComparison.Ordinal));
+            return unnecessary;
+        }
+
+        private bool IsProtectedBranch(Models.Branch branch)
+        {
+            if (branch == null)
+                return false;
+
+            return branch.Name.Equals("main", StringComparison.Ordinal) ||
+                branch.Name.Equals("master", StringComparison.Ordinal) ||
+                branch.Name.Equals("develop", StringComparison.Ordinal) ||
+                (!string.IsNullOrEmpty(GitFlow.Master) && branch.Name.Equals(GitFlow.Master, StringComparison.Ordinal)) ||
+                (!string.IsNullOrEmpty(GitFlow.Develop) && branch.Name.Equals(GitFlow.Develop, StringComparison.Ordinal));
+        }
+
+        private void RenameBranchGraphColor(string oldFullName, string newFullName)
+        {
+            if (string.IsNullOrEmpty(oldFullName) ||
+                string.IsNullOrEmpty(newFullName) ||
+                oldFullName.Equals(newFullName, StringComparison.Ordinal) ||
+                !_settings.BranchGraphColors.TryGetValue(oldFullName, out var color))
+                return;
+
+            _settings.BranchGraphColors.Remove(oldFullName);
+            _settings.BranchGraphColors[newFullName] = color;
+            _settings.Save();
+        }
+
+        private static string GetBranchGraphColorKey(Models.Branch branch)
+        {
+            if (branch == null)
+                return string.Empty;
+
+            if (!string.IsNullOrEmpty(branch.FullName))
+                return branch.FullName;
+
+            if (!string.IsNullOrEmpty(branch.FriendlyName))
+                return branch.FriendlyName;
+
+            return branch.Head ?? string.Empty;
         }
 
         public void MergeMultipleBranches(List<Models.Branch> branches)

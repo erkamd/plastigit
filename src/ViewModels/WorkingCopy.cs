@@ -662,6 +662,109 @@ namespace SourceGit.ViewModels
             IsCommitting = false;
         }
 
+        public async Task<bool> CommitToNewBranchAsync(string branchName)
+        {
+            if (string.IsNullOrWhiteSpace(_commitMessage))
+                return true;
+
+            if (_repo.IsBare)
+            {
+                _repo.SendNotification("Can not commit to a new branch in a bare repository.", true);
+                return true;
+            }
+
+            if (_repo.CurrentBranch == null)
+            {
+                _repo.SendNotification("Git cannot create a branch before your first commit.", true);
+                return true;
+            }
+
+            if (_useAmend)
+            {
+                _repo.SendNotification("Can not commit to a new branch while amending.", true);
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(_filter) && _staged.Count > _visibleStaged.Count)
+            {
+                var msg = App.Text("WorkingCopy.ConfirmCommitWithFilter", _staged.Count, _visibleStaged.Count, _staged.Count - _visibleStaged.Count);
+                var sure = await App.AskConfirmAsync(msg);
+                if (!sure)
+                    return true;
+            }
+
+            var autoStage = false;
+            if (_staged.Count == 0)
+            {
+                var rs = await App.AskConfirmEmptyCommitAsync(_cached.Count > 0, _selectedUnstaged is { Count: > 0 });
+                if (rs == Models.ConfirmEmptyCommitResult.Cancel)
+                    return true;
+
+                if (rs == Models.ConfirmEmptyCommitResult.StageAllAndCommit)
+                    autoStage = true;
+                else if (rs == Models.ConfirmEmptyCommitResult.StageSelectedAndCommit)
+                    await StageChangesAsync(_selectedUnstaged, null);
+            }
+
+            if (autoStage && HasUnsolvedConflicts)
+            {
+                _repo.SendNotification("Repository has unsolved conflict(s). Auto-stage and commit is disabled!", true);
+                return true;
+            }
+
+            using var lockWatcher = _repo.LockWatcher();
+            IsCommitting = true;
+            try
+            {
+                _repo.Settings.PushCommitMessage(_commitMessage);
+
+                if (autoStage && _unstaged.Count > 0)
+                    await StageChangesAsync(_unstaged, null);
+
+                var baseRevision = _repo.CurrentBranch.Head;
+                var created = new Models.Branch()
+                {
+                    Name = branchName,
+                    FullName = $"refs/heads/{branchName}",
+                    CommitterDate = _repo.CurrentBranch.CommitterDate,
+                    Head = baseRevision,
+                    IsLocal = true,
+                };
+
+                var log = _repo.CreateLog($"Commit to new branch '{branchName}'");
+                var succ = await new Commands.Checkout(_repo.FullPath)
+                    .Use(log)
+                    .BranchAsync(branchName, baseRevision, false, false);
+
+                if (succ)
+                {
+                    _repo.RefreshAfterCreateBranch(created, true);
+                    succ = await new Commands.Commit(_repo.FullPath, _commitMessage, EnableSignOff, NoVerifyOnCommit, false, false)
+                        .Use(log)
+                        .RunAsync();
+                }
+
+                log.Complete();
+
+                if (succ)
+                {
+                    CommitMessage = string.Empty;
+                }
+                else
+                {
+                    _repo.MarkWorkingCopyDirtyManually();
+                }
+
+                _repo.MarkBranchesDirtyManually();
+            }
+            finally
+            {
+                IsCommitting = false;
+            }
+
+            return true;
+        }
+
         private List<Models.Change> GetVisibleChanges(List<Models.Change> changes)
         {
             if (string.IsNullOrEmpty(_filter))

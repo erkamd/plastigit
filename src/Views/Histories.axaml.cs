@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
@@ -331,6 +331,10 @@ namespace SourceGit.Views
         public Histories()
         {
             InitializeComponent();
+
+            BranchExplorerScrollViewer.AddHandler(PointerPressedEvent, OnBranchExplorerScrollPointerPressed, RoutingStrategies.Tunnel, true);
+            BranchExplorerScrollViewer.AddHandler(PointerMovedEvent, OnBranchExplorerScrollPointerMoved, RoutingStrategies.Tunnel, true);
+            BranchExplorerScrollViewer.AddHandler(PointerReleasedEvent, OnBranchExplorerScrollPointerReleased, RoutingStrategies.Tunnel, true);
         }
 
         public async Task GotoParent()
@@ -338,10 +342,7 @@ namespace SourceGit.Views
             if (DataContext is not ViewModels.Histories vm)
                 return;
 
-            if (!CommitListContainer.IsKeyboardFocusWithin)
-                return;
-
-            if (CommitListContainer.SelectedItems is not { Count: 1 } selected)
+            if (vm.SelectedCommits is not { Count: 1 } selected)
                 return;
 
             if (selected[0] is not Models.Commit { Parents.Count: > 0 } commit)
@@ -381,10 +382,7 @@ namespace SourceGit.Views
             if (DataContext is not ViewModels.Histories vm)
                 return;
 
-            if (!CommitListContainer.IsKeyboardFocusWithin)
-                return;
-
-            if (CommitListContainer.SelectedItems is not { Count: 1 } selected)
+            if (vm.SelectedCommits is not { Count: 1 } selected)
                 return;
 
             if (selected[0] is not Models.Commit { Parents.Count: > 0 } commit)
@@ -422,218 +420,142 @@ namespace SourceGit.Views
         protected override void OnDataContextChanged(EventArgs e)
         {
             base.OnDataContextChanged(e);
-
-            if (DataContext is ViewModels.Histories vm)
-                CommitListContainer.Columns[1].Width = new(vm.AuthorColumnWidth, DataGridLengthUnitType.Pixel);
         }
 
-        private void OnCommitListHeaderPointerMoved(object sender, PointerEventArgs e)
-        {
-            if (sender is not Border border)
-                return;
-
-            if (DataContext is not ViewModels.Histories { IsAuthorColumnVisible: true } vm)
-                return;
-
-            var pos = e.GetPosition(border);
-            if (_resizingAuthorColumn)
-            {
-                var posX = CommitListContainer.Columns[0].ActualWidth;
-                var maxW = posX + CommitListContainer.Columns[1].ActualWidth - 100;
-                var delta = posX - pos.X;
-                var w = Math.Max(Math.Min(vm.AuthorColumnWidth + delta, maxW), 80);
-                CommitListContainer.Columns[1].Width = new(w, DataGridLengthUnitType.Pixel);
-                vm.AuthorColumnWidth = w;
-            }
-            else
-            {
-                var dis = CommitListContainer.Columns[0].ActualWidth - 4 - pos.X;
-                if (dis < 4 && dis > -4)
-                {
-                    if (border.Cursor != _resizingCursor)
-                        border.Cursor = _resizingCursor;
-                }
-                else if (border.Cursor != Cursor.Default)
-                {
-                    border.Cursor = Cursor.Default;
-                }
-            }
-        }
-
-        private void OnCommitListHeaderPointerPressed(object sender, PointerPressedEventArgs e)
-        {
-            if (sender is not Border border)
-                return;
-
-            var pos = e.GetPosition(border);
-            var dis = CommitListContainer.Columns[0].ActualWidth - 4 - pos.X;
-            if (dis > 4 || dis < -4)
-                return;
-
-            if (e.GetCurrentPoint(border).Properties.IsLeftButtonPressed)
-            {
-                _resizingAuthorColumn = true;
-                e.Handled = true;
-            }
-        }
-
-        private void OnCommitListHeaderPointerReleased(object sender, PointerReleasedEventArgs e)
-        {
-            _resizingAuthorColumn = false;
-        }
-
-        private void OnCommitListHeaderContextRequested(object sender, ContextRequestedEventArgs e)
-        {
-            if (DataContext is not ViewModels.Histories vm)
-                return;
-
-            if (sender is not Border border)
-                return;
-
-            var columnsHeader = new MenuItem();
-            columnsHeader.Header = new TextBlock() { Text = App.Text("Histories.ShowColumns"), FontWeight = FontWeight.Bold };
-            columnsHeader.IsEnabled = false;
-
-            var authorColumn = new MenuItem();
-            authorColumn.Header = App.Text("Histories.Header.Author");
-            if (vm.IsAuthorColumnVisible)
-                authorColumn.Icon = this.CreateMenuIcon("Icons.Check");
-            authorColumn.Click += (_, ev) =>
-            {
-                vm.IsAuthorColumnVisible = !vm.IsAuthorColumnVisible;
-                ev.Handled = true;
-            };
-
-            var shaColumn = new MenuItem();
-            shaColumn.Header = App.Text("Histories.Header.SHA");
-            if (vm.IsSHAColumnVisible)
-                shaColumn.Icon = this.CreateMenuIcon("Icons.Check");
-            shaColumn.Click += (_, ev) =>
-            {
-                vm.IsSHAColumnVisible = !vm.IsSHAColumnVisible;
-                ev.Handled = true;
-            };
-
-            var timeColumn = new MenuItem();
-            timeColumn.Header = App.Text("Histories.Header.DateTime");
-            if (vm.IsDateTimeColumnVisible)
-                timeColumn.Icon = this.CreateMenuIcon("Icons.Check");
-            timeColumn.Click += (_, ev) =>
-            {
-                vm.IsDateTimeColumnVisible = !vm.IsDateTimeColumnVisible;
-                ev.Handled = true;
-            };
-
-            var menu = new ContextMenu();
-            menu.Items.Add(columnsHeader);
-            menu.Items.Add(authorColumn);
-            menu.Items.Add(shaColumn);
-            menu.Items.Add(timeColumn);
-            menu.Open(border);
-            e.Handled = true;
-        }
-
-        private void OnCommitListLayoutUpdated(object _1, EventArgs _2)
-        {
-            if (!IsLoaded)
-                return;
-
-            var dataGrid = CommitListContainer;
-            var rowsPresenter = dataGrid.FindDescendantOfType<DataGridRowsPresenter>();
-            if (rowsPresenter == null)
-                return;
-
-            double rowHeight = dataGrid.RowHeight;
-            double startY = 0;
-            foreach (var child in rowsPresenter.Children)
-            {
-                if (child is DataGridRow { IsVisible: true } row)
-                {
-                    rowHeight = row.Bounds.Height;
-
-                    if (row.Bounds.Top <= 0 && row.Bounds.Top > -rowHeight)
-                    {
-                        var test = rowHeight * row.Index - row.Bounds.Top;
-                        if (startY < test)
-                            startY = test;
-                    }
-                }
-            }
-
-            SetCurrentValue(IsScrollToTopVisibleProperty, startY >= rowHeight);
-
-            var clipWidth = dataGrid.Columns[0].ActualWidth - 4;
-            var lastLayout = CommitGraph.Layout;
-            if (lastLayout == null ||
-                Math.Abs(lastLayout.StartY - startY) > 0.01 ||
-                Math.Abs(lastLayout.ClipWidth - clipWidth) > 0.01 ||
-                Math.Abs(lastLayout.RowHeight - rowHeight) > 0.01)
-                CommitGraph.Layout = new(startY, clipWidth, rowHeight);
-        }
-
-        private void OnScrollToTopPointerPressed(object sender, PointerPressedEventArgs e)
-        {
-            if (DataContext is ViewModels.Histories histories)
-                CommitListContainer.ScrollIntoView(histories.Commits[0], null);
-        }
-
-        private void OnCommitListContextRequested(object sender, ContextRequestedEventArgs e)
+        public void ShowContextMenuForCommit(Models.Commit commit, Control target, string branchKey = null)
         {
             var repoView = this.FindAncestorOfType<Repository>();
             if (repoView is not { DataContext: ViewModels.Repository repo })
                 return;
 
-            var selected = CommitListContainer.SelectedItems;
-            if (selected is not { Count: > 0 })
+            var menu = CreateContextMenuForSingleCommit(repo, commit, branchKey);
+            if (menu != null)
+                menu.Open(target);
+        }
+
+        public async Task DoubleTapCommit(Models.Commit commit)
+        {
+            if (DataContext is ViewModels.Histories histories)
+            {
+                await histories.CheckoutBranchByCommitAsync(commit);
+            }
+        }
+
+        private void OnScrollViewerScrollChanged(object sender, ScrollChangedEventArgs e)
+        {
+            if (sender is ScrollViewer scrollViewer)
+            {
+                bool showScrollToRight = scrollViewer.Offset.X < scrollViewer.Extent.Width - scrollViewer.Viewport.Width - 100;
+                SetCurrentValue(IsScrollToTopVisibleProperty, showScrollToRight);
+            }
+        }
+
+        private string _lastCommitsRepo = null;
+
+        private void OnScrollViewerLayoutUpdated(object sender, EventArgs e)
+        {
+            if (sender is ScrollViewer scrollViewer && DataContext is ViewModels.Histories vm)
+            {
+                if (vm.Commits != null && vm.Commits.Count > 0)
+                {
+                    string currentRepo = vm.Commits[0].SHA;
+                    if (_lastCommitsRepo != currentRepo)
+                    {
+                        _lastCommitsRepo = currentRepo;
+                        scrollViewer.Offset = new Point(scrollViewer.Extent.Width - scrollViewer.Viewport.Width, scrollViewer.Offset.Y);
+                    }
+                }
+            }
+        }
+
+        private void OnScrollToTopPointerPressed(object sender, PointerPressedEventArgs e)
+        {
+            var scrollViewer = this.FindDescendantOfType<ScrollViewer>();
+            if (scrollViewer != null)
+            {
+                scrollViewer.Offset = new Point(scrollViewer.Extent.Width - scrollViewer.Viewport.Width, scrollViewer.Offset.Y);
+            }
+        }
+
+        private void OnBranchExplorerScrollPointerPressed(object sender, PointerPressedEventArgs e)
+        {
+            if (sender is not ScrollViewer scrollViewer)
                 return;
 
-            var commits = new List<Models.Commit>();
-            for (var i = selected.Count - 1; i >= 0; i--)
+            var point = e.GetCurrentPoint(scrollViewer);
+            if (!point.Properties.IsLeftButtonPressed || IsBranchExplorerScrollBarEvent(e.Source))
+                return;
+
+            var maxX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+            var maxY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+            if (maxX <= 0 && maxY <= 0)
+                return;
+
+            _branchExplorerPanPressed = true;
+            _branchExplorerIsPanning = false;
+            _branchExplorerPanStartPosition = e.GetPosition(scrollViewer);
+            _branchExplorerPanStartOffset = scrollViewer.Offset;
+            e.Pointer.Capture(scrollViewer);
+        }
+
+        private void OnBranchExplorerScrollPointerMoved(object sender, PointerEventArgs e)
+        {
+            if (!_branchExplorerPanPressed || sender is not ScrollViewer scrollViewer)
+                return;
+
+            var point = e.GetCurrentPoint(scrollViewer);
+            if (!point.Properties.IsLeftButtonPressed)
             {
-                if (selected[i] is Models.Commit c)
-                    commits.Add(c);
+                EndBranchExplorerPan(scrollViewer, e);
+                return;
             }
 
-            if (selected.Count > 1)
+            var current = e.GetPosition(scrollViewer);
+            var dx = current.X - _branchExplorerPanStartPosition.X;
+            var dy = current.Y - _branchExplorerPanStartPosition.Y;
+
+            if (!_branchExplorerIsPanning)
             {
-                var menu = CreateContextMenuForMultipleCommits(repo, commits);
-                menu.Open(CommitListContainer);
+                if (dx * dx + dy * dy < BranchExplorerDragPanThreshold * BranchExplorerDragPanThreshold)
+                    return;
+
+                _branchExplorerIsPanning = true;
+                scrollViewer.Cursor = new Cursor(StandardCursorType.SizeAll);
             }
-            else if (selected.Count == 1)
-            {
-                var menu = CreateContextMenuForSingleCommit(repo, commits[0]);
-                menu.Open(CommitListContainer);
-            }
+
+            var maxX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+            var maxY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+            var x = Math.Clamp(_branchExplorerPanStartOffset.X - dx, 0, maxX);
+            var y = Math.Clamp(_branchExplorerPanStartOffset.Y - dy, 0, maxY);
+            scrollViewer.Offset = new Vector(x, y);
 
             e.Handled = true;
         }
 
-        private async void OnCommitListDoubleTapped(object sender, TappedEventArgs e)
+        private void OnBranchExplorerScrollPointerReleased(object sender, PointerReleasedEventArgs e)
         {
-            e.Handled = true;
+            if (!_branchExplorerPanPressed || sender is not ScrollViewer scrollViewer)
+                return;
 
-            if (DataContext is ViewModels.Histories histories &&
-                CommitListContainer.SelectedItems is { Count: 1 } &&
-                sender is DataGrid grid &&
-                !Equals(e.Source, grid))
-            {
-                if (e.Source is CommitRefsPresenter crp)
-                {
-                    var decorator = crp.DecoratorAt(e.GetPosition(crp));
-                    var succ = await histories.CheckoutBranchByDecoratorAsync(decorator);
-                    if (succ)
-                        return;
-                }
-
-                if (e.Source is Control { DataContext: Models.Commit c })
-                    await histories.CheckoutBranchByCommitAsync(c);
-            }
+            var wasPanning = _branchExplorerIsPanning;
+            EndBranchExplorerPan(scrollViewer, e);
+            e.Handled = wasPanning;
         }
 
-        private void OnCommitGraphLoaded(object sender, RoutedEventArgs e)
+        private static bool IsBranchExplorerScrollBarEvent(object source)
         {
-            // Force-update the graph layout to ensure the graph is correctly rendered when it's loaded.
-            OnCommitListLayoutUpdated(sender, e);
+            if (source is not Control control)
+                return false;
+
+            return control is ScrollBar || control.FindAncestorOfType<ScrollBar>() != null;
+        }
+
+        private void EndBranchExplorerPan(ScrollViewer scrollViewer, PointerEventArgs e)
+        {
+            e.Pointer.Capture(null);
+            _branchExplorerPanPressed = false;
+            _branchExplorerIsPanning = false;
+            scrollViewer.Cursor = null;
         }
 
         private void OnTabHeaderPointerPressed(object sender, PointerPressedEventArgs e)
@@ -830,7 +752,7 @@ namespace SourceGit.Views
             return menu;
         }
 
-        private ContextMenu CreateContextMenuForSingleCommit(ViewModels.Repository repo, Models.Commit commit)
+        private ContextMenu CreateContextMenuForSingleCommit(ViewModels.Repository repo, Models.Commit commit, string branchKey = null)
         {
             var current = repo.CurrentBranch;
             var vm = DataContext as ViewModels.Histories;
@@ -940,47 +862,7 @@ namespace SourceGit.Views
                     merge.Icon = this.CreateMenuIcon("Icons.Merge");
                     merge.Click += (_, e) =>
                     {
-                        if (repo.CanCreatePopup())
-                        {
-                            var found = false;
-                            foreach (var d in commit.Decorators)
-                            {
-                                if (d.Type == Models.DecoratorType.LocalBranchHead)
-                                {
-                                    var b = repo.Branches.Find(x => x.IsLocal && x.Name.Equals(d.Name, StringComparison.Ordinal));
-                                    if (b != null)
-                                    {
-                                        found = true;
-                                        repo.ShowPopup(new ViewModels.Merge(repo, b, current.Name, false));
-                                        break;
-                                    }
-                                }
-                                else if (d.Type == Models.DecoratorType.RemoteBranchHead)
-                                {
-                                    var rb = repo.Branches.Find(x => !x.IsLocal && x.FriendlyName.Equals(d.Name, StringComparison.Ordinal));
-                                    if (rb != null)
-                                    {
-                                        found = true;
-                                        repo.ShowPopup(new ViewModels.Merge(repo, rb, current.Name, false));
-                                        break;
-                                    }
-                                }
-                                else if (d.Type == Models.DecoratorType.Tag)
-                                {
-                                    var t = repo.Tags.Find(x => x.Name.Equals(d.Name, StringComparison.Ordinal));
-                                    if (t != null)
-                                    {
-                                        found = true;
-                                        repo.ShowPopup(new ViewModels.Merge(repo, t, current.Name));
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if (!found)
-                                repo.ShowPopup(new ViewModels.Merge(repo, commit, current.Name));
-                        }
-
+                        ShowMergeFromHerePopup(repo, current, commit);
                         e.Handled = true;
                     };
                     menu.Items.Add(merge);
@@ -1139,7 +1021,14 @@ namespace SourceGit.Views
                 {
                     var head = await vm.CompareWithHeadAsync(commit);
                     if (head != null)
-                        CommitListContainer.SelectedItems.Add(head);
+                    {
+                        var list = new List<Models.Commit>(vm.SelectedCommits);
+                        if (!list.Contains(head))
+                        {
+                            list.Add(head);
+                            vm.SelectedCommits = list;
+                        }
+                    }
 
                     e.Handled = true;
                 };
@@ -1315,7 +1204,272 @@ namespace SourceGit.Views
             copy.Items.Add(copyCommitterTime);
             menu.Items.Add(copy);
 
+            return CreateFocusedCommitContextMenu(repo, current, commit, vm, branchKey, menu);
+        }
+
+        private const double BranchExplorerDragPanThreshold = 4;
+        private bool _branchExplorerPanPressed = false;
+        private bool _branchExplorerIsPanning = false;
+        private Point _branchExplorerPanStartPosition;
+        private Vector _branchExplorerPanStartOffset;
+
+        private ContextMenu CreateFocusedCommitContextMenu(
+            ViewModels.Repository repo,
+            Models.Branch current,
+            Models.Commit commit,
+            ViewModels.Histories vm,
+            string branchKey,
+            ContextMenu advancedSource)
+        {
+            var menu = new ContextMenu();
+
+            var goHere = new MenuItem();
+            goHere.Header = "Go here";
+            goHere.Icon = this.CreateMenuIcon("Icons.Detached");
+            goHere.IsEnabled = !commit.IsCurrentHead && !repo.IsBare;
+            goHere.Click += async (_, e) =>
+            {
+                await vm.CheckoutBranchByCommitAsync(commit);
+                e.Handled = true;
+            };
+            menu.Items.Add(goHere);
+
+            var createBranch = new MenuItem();
+            createBranch.Header = App.Text("CreateBranch");
+            createBranch.Icon = this.CreateMenuIcon("Icons.Branch.Add");
+            createBranch.Click += (_, e) =>
+            {
+                if (repo.CanCreatePopup())
+                    repo.ShowPopup(new ViewModels.CreateBranch(repo, commit));
+
+                e.Handled = true;
+            };
+            menu.Items.Add(createBranch);
+
+            var mergeToHere = new MenuItem();
+            mergeToHere.Header = "Merge to here";
+            mergeToHere.Icon = this.CreateMenuIcon("Icons.Merge");
+            var targetBranch = FindLocalBranchAtCommit(repo, commit, current);
+            mergeToHere.IsEnabled = !repo.IsBare && targetBranch != null;
+            mergeToHere.Click += async (_, e) =>
+            {
+                if (targetBranch != null)
+                    await MergeCurrentBranchToTargetBranchAsync(repo, current, targetBranch);
+
+                e.Handled = true;
+            };
+            menu.Items.Add(mergeToHere);
+
+            var mergeFromHere = new MenuItem();
+            mergeFromHere.Header = "Merge from here";
+            mergeFromHere.Icon = this.CreateMenuIcon("Icons.Merge");
+            mergeFromHere.IsEnabled = !repo.IsBare && !commit.IsMerged;
+            mergeFromHere.Click += (_, e) =>
+            {
+                ShowMergeFromHerePopup(repo, current, commit);
+                e.Handled = true;
+            };
+            menu.Items.Add(mergeFromHere);
+
+            var deleteCommit = new MenuItem();
+            deleteCommit.Header = "Delete commit";
+            deleteCommit.Icon = this.CreateMenuIcon("Icons.Clear");
+            var deleteTarget = FindDeleteCommitTarget(repo, vm, commit, branchKey);
+            deleteCommit.IsEnabled = deleteTarget != null;
+            deleteCommit.Click += async (_, e) =>
+            {
+                if (deleteTarget != null)
+                    await DeleteBranchTipCommitAsync(repo, vm, deleteTarget);
+
+                e.Handled = true;
+            };
+            menu.Items.Add(deleteCommit);
+
+            var advanced = new MenuItem();
+            advanced.Header = "Advanced";
+            advanced.Icon = this.CreateMenuIcon("Icons.More");
+            MoveContextMenuItems(advancedSource, advanced, App.Text("CreateBranch"));
+            menu.Items.Add(advanced);
+
             return menu;
+        }
+
+        private static void MoveContextMenuItems(ContextMenu source, MenuItem target, string skipHeader)
+        {
+            var items = new List<object>();
+            var skipped = false;
+            foreach (var item in source.Items)
+            {
+                if (!skipped &&
+                    !string.IsNullOrEmpty(skipHeader) &&
+                    item is MenuItem menuItem &&
+                    Equals(menuItem.Header, skipHeader))
+                {
+                    skipped = true;
+                    continue;
+                }
+
+                items.Add(item);
+            }
+
+            source.Items.Clear();
+            foreach (var item in items)
+                target.Items.Add(item);
+        }
+
+        private Models.Branch FindLocalBranchAtCommit(ViewModels.Repository repo, Models.Commit commit, Models.Branch current)
+        {
+            foreach (var d in commit.Decorators)
+            {
+                if (d.Type != Models.DecoratorType.LocalBranchHead)
+                    continue;
+
+                var branch = repo.Branches.Find(x => x.IsLocal && d.Name.Equals(x.Name, StringComparison.Ordinal));
+                if (branch != null && !branch.FullName.Equals(current.FullName, StringComparison.Ordinal))
+                    return branch;
+            }
+
+            foreach (var d in commit.Decorators)
+            {
+                if (d.Type != Models.DecoratorType.RemoteBranchHead)
+                    continue;
+
+                var remote = repo.Branches.Find(x => !x.IsLocal && d.Name.Equals(x.FriendlyName, StringComparison.Ordinal));
+                if (remote == null)
+                    continue;
+
+                var branch = repo.Branches.Find(x => x.IsLocal && x.Upstream != null && x.Upstream.Equals(remote.FullName, StringComparison.Ordinal));
+                if (branch != null && !branch.FullName.Equals(current.FullName, StringComparison.Ordinal))
+                    return branch;
+            }
+
+            return null;
+        }
+
+        private DeleteCommitTarget FindDeleteCommitTarget(ViewModels.Repository repo, ViewModels.Histories vm, Models.Commit commit, string branchKey)
+        {
+            if (repo is not { IsBare: false } ||
+                vm == null ||
+                commit is not { Parents.Count: > 0 } ||
+                string.IsNullOrEmpty(branchKey))
+                return null;
+
+            var branch = repo.Branches.Find(x =>
+                x.IsLocal &&
+                !x.IsDetachedHead &&
+                !string.IsNullOrEmpty(x.FullName) &&
+                x.FullName.Equals(branchKey, StringComparison.Ordinal));
+
+            if (branch == null || !commit.SHA.Equals(branch.Head, StringComparison.Ordinal))
+                return null;
+
+            if (HasDependentCommit(vm, commit.SHA))
+                return null;
+
+            return new DeleteCommitTarget(branch, commit.Parents[0]);
+        }
+
+        private static bool HasDependentCommit(ViewModels.Histories vm, string sha)
+        {
+            foreach (var commit in vm.Commits)
+            {
+                foreach (var parent in commit.Parents)
+                {
+                    if (sha.StartsWith(parent, StringComparison.Ordinal) || parent.StartsWith(sha, StringComparison.Ordinal))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private async Task DeleteBranchTipCommitAsync(ViewModels.Repository repo, ViewModels.Histories vm, DeleteCommitTarget target)
+        {
+            if (target == null || !repo.CanCreatePopup())
+                return;
+
+            var parent = vm.Commits.Find(x => x.SHA.Equals(target.ParentSHA, StringComparison.Ordinal));
+            parent ??= await vm.GetCommitAsync(target.ParentSHA);
+            if (parent == null)
+            {
+                repo.SendNotification($"Commit '{target.ParentSHA}' is not a valid revision for branch reset!", true);
+                return;
+            }
+
+            if (target.Branch.IsCurrent)
+            {
+                repo.ShowPopup(new ViewModels.Reset(repo, target.Branch, parent));
+            }
+            else
+            {
+                repo.ShowPopup(new ViewModels.ResetWithoutCheckout(repo, target.Branch, parent));
+            }
+        }
+
+        private class DeleteCommitTarget
+        {
+            public DeleteCommitTarget(Models.Branch branch, string parentSHA)
+            {
+                Branch = branch;
+                ParentSHA = parentSHA;
+            }
+
+            public Models.Branch Branch { get; }
+            public string ParentSHA { get; }
+        }
+
+        private async Task MergeCurrentBranchToTargetBranchAsync(ViewModels.Repository repo, Models.Branch current, Models.Branch target)
+        {
+            if (!repo.CanCreatePopup() || target == null || current == null)
+                return;
+
+            await repo.CheckoutBranchAsync(target);
+            if (repo.CurrentBranch != null && repo.CurrentBranch.FullName.Equals(target.FullName, StringComparison.Ordinal) && repo.CanCreatePopup())
+                repo.ShowPopup(new ViewModels.Merge(repo, current, target.Name, false));
+        }
+
+        private void ShowMergeFromHerePopup(ViewModels.Repository repo, Models.Branch current, Models.Commit commit)
+        {
+            if (!repo.CanCreatePopup())
+                return;
+
+            var found = false;
+            foreach (var d in commit.Decorators)
+            {
+                if (d.Type == Models.DecoratorType.LocalBranchHead)
+                {
+                    var b = repo.Branches.Find(x => x.IsLocal && x.Name.Equals(d.Name, StringComparison.Ordinal));
+                    if (b != null)
+                    {
+                        found = true;
+                        repo.ShowPopup(new ViewModels.Merge(repo, b, current.Name, false));
+                        break;
+                    }
+                }
+                else if (d.Type == Models.DecoratorType.RemoteBranchHead)
+                {
+                    var rb = repo.Branches.Find(x => !x.IsLocal && x.FriendlyName.Equals(d.Name, StringComparison.Ordinal));
+                    if (rb != null)
+                    {
+                        found = true;
+                        repo.ShowPopup(new ViewModels.Merge(repo, rb, current.Name, false));
+                        break;
+                    }
+                }
+                else if (d.Type == Models.DecoratorType.Tag)
+                {
+                    var t = repo.Tags.Find(x => x.Name.Equals(d.Name, StringComparison.Ordinal));
+                    if (t != null)
+                    {
+                        found = true;
+                        repo.ShowPopup(new ViewModels.Merge(repo, t, current.Name));
+                        break;
+                    }
+                }
+            }
+
+            if (!found)
+                repo.ShowPopup(new ViewModels.Merge(repo, commit, current.Name));
         }
 
         private void FillCurrentBranchMenu(ContextMenu menu, ViewModels.Repository repo, Models.Branch current)
@@ -1652,8 +1806,5 @@ namespace SourceGit.Views
             else
                 await this.ShowDialogAsync(new ViewModels.InteractiveRebase(repo, on, prefill));
         }
-
-        private bool _resizingAuthorColumn = false;
-        private Cursor _resizingCursor = new Cursor(StandardCursorType.SizeWestEast);
     }
 }
