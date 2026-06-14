@@ -72,5 +72,12 @@
         </ComboBox.SelectionBoxItemTemplate>
       </ComboBox>
     </Grid>
+
+    <TextBlock Margin="120,8,0,0"
+               MaxWidth="520"
+               Text="{Binding RemoteDeletionDescription}"
+               TextWrapping="Wrap"
+               Foreground="DarkOrange"
+               IsVisible="{Binding RemovesRemoteCommit}"/>
   </StackPanel>
 </UserControl>

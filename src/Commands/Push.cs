@@ -43,6 +43,34 @@ namespace SourceGit.Commands
             Args = builder.ToString();
         }
 
+        public Push(
+            string repo,
+            string remote,
+            string localRevision,
+            string remoteBranch,
+            string expectedRemoteRevision)
+        {
+            _remote = remote;
+
+            WorkingDirectory = repo;
+            Context = repo;
+
+            var builder = new StringBuilder(512);
+            builder.Append("push --progress --verbose ");
+            builder.Append("--force-with-lease=")
+                .Append(remoteBranch)
+                .Append(':')
+                .Append(expectedRemoteRevision)
+                .Append(' ')
+                .Append(remote)
+                .Append(' ')
+                .Append(localRevision)
+                .Append(':')
+                .Append(remoteBranch);
+
+            Args = builder.ToString();
+        }
+
         public async Task<bool> RunAsync()
         {
             SSHKey = await new Config(WorkingDirectory).GetAsync($"remote.{_remote}.sshkey").ConfigureAwait(false);

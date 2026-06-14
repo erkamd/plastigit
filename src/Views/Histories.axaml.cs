@@ -1275,10 +1275,13 @@ namespace SourceGit.Views
             deleteCommit.Header = "Delete commit";
             deleteCommit.Icon = this.CreateMenuIcon("Icons.Clear");
             var deleteTarget = FindDeleteCommitTarget(repo, vm, commit, branchKey);
-            deleteCommit.IsEnabled = deleteTarget != null;
+            deleteCommit.IsEnabled = false;
+            if (deleteTarget != null)
+                _ = UpdateDeleteCommitAvailabilityAsync(repo, deleteTarget, deleteCommit);
+
             deleteCommit.Click += async (_, e) =>
             {
-                if (deleteTarget != null)
+                if (deleteTarget is { IsValidated: true })
                     await DeleteBranchTipCommitAsync(repo, vm, deleteTarget);
 
                 e.Handled = true;
@@ -1366,7 +1369,28 @@ namespace SourceGit.Views
             if (HasDependentCommit(vm, commit.SHA))
                 return null;
 
-            return new DeleteCommitTarget(branch, commit.Parents[0]);
+            return new DeleteCommitTarget(branch, commit.SHA, commit.Parents[0]);
+        }
+
+        private async Task UpdateDeleteCommitAvailabilityAsync(
+            ViewModels.Repository repo,
+            DeleteCommitTarget target,
+            MenuItem menuItem)
+        {
+            try
+            {
+                var validation = await ValidateDeleteCommitAsync(repo, target, false, false);
+                if (!validation.IsAllowed)
+                    return;
+
+                target.IsValidated = true;
+                menuItem.IsEnabled = true;
+            }
+            catch (Exception exception)
+            {
+                Native.OS.LogException(exception);
+                menuItem.IsEnabled = false;
+            }
         }
 
         private static bool HasDependentCommit(ViewModels.Histories vm, string sha)
@@ -1385,7 +1409,7 @@ namespace SourceGit.Views
 
         private async Task DeleteBranchTipCommitAsync(ViewModels.Repository repo, ViewModels.Histories vm, DeleteCommitTarget target)
         {
-            if (target == null || !repo.CanCreatePopup())
+            if (target is not { IsValidated: true } || !repo.CanCreatePopup())
                 return;
 
             var parent = vm.Commits.Find(x => x.SHA.Equals(target.ParentSHA, StringComparison.Ordinal));
@@ -1396,26 +1420,139 @@ namespace SourceGit.Views
                 return;
             }
 
-            if (target.Branch.IsCurrent)
+            var validation = await ValidateDeleteCommitAsync(repo, target, true, true);
+            if (!validation.IsAllowed)
             {
-                repo.ShowPopup(new ViewModels.Reset(repo, target.Branch, parent));
+                if (!string.IsNullOrEmpty(validation.Error))
+                    repo.SendNotification(validation.Error, true);
+                return;
+            }
+
+            var remoteDeletion = validation.RemoteDeletion;
+            var branch = repo.Branches.Find(x =>
+                x.IsLocal &&
+                x.FullName.Equals(target.Branch.FullName, StringComparison.Ordinal));
+            if (branch == null)
+                return;
+
+            if (!repo.CanCreatePopup())
+                return;
+
+            if (branch.IsCurrent)
+            {
+                repo.ShowPopup(new ViewModels.Reset(repo, branch, parent, remoteDeletion));
             }
             else
             {
-                repo.ShowPopup(new ViewModels.ResetWithoutCheckout(repo, target.Branch, parent));
+                repo.ShowPopup(new ViewModels.ResetWithoutCheckout(repo, branch, parent, remoteDeletion));
             }
+        }
+
+        private async Task<DeleteCommitValidation> ValidateDeleteCommitAsync(
+            ViewModels.Repository repo,
+            DeleteCommitTarget target,
+            bool checkRemoteProtection,
+            bool includeError)
+        {
+            var branch = repo.Branches.Find(x =>
+                x.IsLocal &&
+                x.FullName.Equals(target.Branch.FullName, StringComparison.Ordinal));
+            if (branch == null)
+                return DeleteCommitValidation.Blocked(includeError ? "The target branch no longer exists. Commit deletion was cancelled." : null);
+
+            var branchHead = await new Commands.QueryRevisionByRefName(repo.FullPath, branch.FullName).GetResultAsync();
+            if (!target.CommitSHA.Equals(branchHead, StringComparison.Ordinal))
+                return DeleteCommitValidation.Blocked(includeError ? "The target branch has changed. Commit deletion was cancelled." : null);
+
+            if (repo.IsProtectedBranch(branch))
+            {
+                var error = includeError
+                    ? $"Branch '{branch.Name}' is protected. Commit deletion was cancelled."
+                    : null;
+                return DeleteCommitValidation.Blocked(error);
+            }
+
+            var hasDescendants = await new Commands.HasCommitDescendants(repo.FullPath, target.CommitSHA).GetResultAsync();
+            if (hasDescendants == null)
+                return DeleteCommitValidation.Blocked(includeError ? "The commit dependency state could not be verified. Commit deletion was cancelled." : null);
+
+            if (hasDescendants.Value)
+                return DeleteCommitValidation.Blocked(includeError ? "Another commit depends on the selected commit. Commit deletion was cancelled." : null);
+
+            if (string.IsNullOrEmpty(branch.Upstream))
+                return DeleteCommitValidation.Allowed(null);
+
+            var upstream = repo.Branches.Find(x =>
+                !x.IsLocal &&
+                x.FullName.Equals(branch.Upstream, StringComparison.Ordinal));
+            if (upstream == null || string.IsNullOrEmpty(upstream.Remote))
+                return DeleteCommitValidation.Allowed(null);
+
+            if (checkRemoteProtection)
+            {
+                var remote = repo.Remotes.Find(x => x.Name.Equals(upstream.Remote, StringComparison.Ordinal));
+                var protection = await Models.RemoteBranchProtection.CheckAsync(remote, upstream.Name);
+                if (protection == Models.RemoteBranchProtectionStatus.Protected)
+                {
+                    var error = includeError
+                        ? $"Remote branch '{upstream.FriendlyName}' is protected. Commit deletion was cancelled."
+                        : null;
+                    return DeleteCommitValidation.Blocked(error);
+                }
+            }
+
+            var upstreamHead = await new Commands.QueryRevisionByRefName(repo.FullPath, upstream.FullName).GetResultAsync();
+            if (!target.CommitSHA.Equals(upstreamHead, StringComparison.Ordinal))
+                return DeleteCommitValidation.Allowed(null);
+
+            var remoteDeletion = new ViewModels.SyncedCommitDeletion(
+                upstream.Remote,
+                $"refs/heads/{upstream.Name}",
+                upstream.FriendlyName,
+                target.CommitSHA,
+                target.ParentSHA);
+
+            return DeleteCommitValidation.Allowed(remoteDeletion);
         }
 
         private class DeleteCommitTarget
         {
-            public DeleteCommitTarget(Models.Branch branch, string parentSHA)
+            public DeleteCommitTarget(Models.Branch branch, string commitSHA, string parentSHA)
             {
                 Branch = branch;
+                CommitSHA = commitSHA;
                 ParentSHA = parentSHA;
             }
 
             public Models.Branch Branch { get; }
+            public string CommitSHA { get; }
             public string ParentSHA { get; }
+            public bool IsValidated { get; set; }
+        }
+
+        private class DeleteCommitValidation
+        {
+            public bool IsAllowed { get; private set; }
+            public string Error { get; private set; }
+            public ViewModels.SyncedCommitDeletion RemoteDeletion { get; private set; }
+
+            public static DeleteCommitValidation Allowed(ViewModels.SyncedCommitDeletion remoteDeletion)
+            {
+                return new DeleteCommitValidation()
+                {
+                    IsAllowed = true,
+                    RemoteDeletion = remoteDeletion,
+                };
+            }
+
+            public static DeleteCommitValidation Blocked(string error)
+            {
+                return new DeleteCommitValidation()
+                {
+                    IsAllowed = false,
+                    Error = error,
+                };
+            }
         }
 
         private async Task MergeCurrentBranchToTargetBranchAsync(ViewModels.Repository repo, Models.Branch current, Models.Branch target)

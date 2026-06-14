@@ -1511,7 +1511,7 @@ namespace SourceGit.ViewModels
             return unnecessary;
         }
 
-        private bool IsProtectedBranch(Models.Branch branch)
+        public bool IsProtectedBranch(Models.Branch branch)
         {
             if (branch == null)
                 return false;
