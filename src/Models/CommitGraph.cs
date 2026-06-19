@@ -216,7 +216,6 @@ namespace SourceGit.Models
         public enum DotType
         {
             Default,
-            Head,
             Merge,
         }
 
@@ -231,6 +230,14 @@ namespace SourceGit.Models
             public string CommitSHA;
             public bool IsLocal = true;
             public bool IsOnRemote;
+
+            // True for a branch's auto-generated init commit - drawn as a play button
+            // regardless of whether it also happens to be the current Head/a merge.
+            public bool IsInit;
+
+            // True if this commit is the current HEAD - drawn as a vertical line through
+            // the dot's normal shape, instead of changing the shape itself.
+            public bool IsCurrentHead;
         }
 
         public List<Lane> Lanes { get; } = [];
@@ -284,10 +291,8 @@ namespace SourceGit.Models
                     laneBranches.Add(branch);
             }
 
-            ComputeTagLanes(laneBranches, commits, out var tagBranchKeys, out var branchCreationIndex);
-
             var primaryKey = GetBranchKey(SelectPrimaryBranch(laneBranches));
-            laneBranches.Sort((l, r) => CompareBranches(l, r, primaryKey, indexBySha, branchCreationIndex));
+            laneBranches.Sort((l, r) => CompareBranches(l, r, primaryKey, indexBySha));
 
             var branchHeadOwners = new Dictionary<string, string>(StringComparer.Ordinal);
             var branchHeads = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -344,7 +349,7 @@ namespace SourceGit.Models
                     lane.UpstreamCommits = CollectCommitsFromHead(lane.UpstreamBranch.Head, commitBySha);
 
                 if (lane.OwnsHeadChain)
-                    BuildOwnedChain(lane, commitBySha, indexBySha, ownedLaneByCommit, branchHeads, tagBranchKeys.Contains(key));
+                    BuildOwnedChain(lane, commitBySha, indexBySha, ownedLaneByCommit, branchHeads);
 
                 if (lane.Commits.Count == 0 && !lane.Branch.IsCurrent)
                 {
@@ -418,7 +423,9 @@ namespace SourceGit.Models
                         CommitSHA = sha,
                         IsLocal = IsLaneCommitLocal(lane, sha),
                         IsOnRemote = remoteCommits.Contains(sha),
-                        Type = commit.IsCurrentHead ? DotType.Head : commit.Parents.Count > 1 ? DotType.Merge : DotType.Default,
+                        Type = commit.Parents.Count > 1 ? DotType.Merge : DotType.Default,
+                        IsInit = commit.Subject == BranchInit.CommitMessage,
+                        IsCurrentHead = commit.IsCurrentHead,
                     };
 
                     graph.Dots.Add(dot);
@@ -566,8 +573,7 @@ namespace SourceGit.Models
                 return result;
 
             var primaryKey = GetBranchKey(SelectPrimaryBranch(visibleBranches));
-            var emptyCreationIndex = new Dictionary<string, int>(StringComparer.Ordinal);
-            visibleBranches.Sort((l, r) => CompareBranches(l, r, primaryKey, indexBySha, emptyCreationIndex));
+            visibleBranches.Sort((l, r) => CompareBranches(l, r, primaryKey, indexBySha));
 
             var branchHeadOwners = new Dictionary<string, string>(StringComparer.Ordinal);
             var branchHeads = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -610,7 +616,7 @@ namespace SourceGit.Models
                 };
 
                 if (lane.OwnsHeadChain)
-                    BuildOwnedChain(lane, commitBySha, indexBySha, ownedLaneByCommit, branchHeads, false);
+                    BuildOwnedChain(lane, commitBySha, indexBySha, ownedLaneByCommit, branchHeads);
 
                 if (lane.Commits.Count == 0 && !lane.Branch.IsCurrent)
                 {
@@ -859,7 +865,7 @@ namespace SourceGit.Models
                 name.Equals("origin/master", StringComparison.Ordinal);
         }
 
-        private static int CompareBranches(Branch left, Branch right, string primaryKey, Dictionary<string, int> indexBySha, Dictionary<string, int> branchCreationIndex)
+        private static int CompareBranches(Branch left, Branch right, string primaryKey, Dictionary<string, int> indexBySha)
         {
             var leftKey = GetBranchKey(left);
             var rightKey = GetBranchKey(right);
@@ -868,13 +874,6 @@ namespace SourceGit.Models
                 return -1;
             if (rightKey.Equals(primaryKey, StringComparison.Ordinal))
                 return 1;
-
-            // When two branches were both derived from per-commit branch tags, prefer the
-            // one whose earliest tagged commit is older as the "parent" branch (lower lane).
-            var leftCreation = branchCreationIndex.GetValueOrDefault(leftKey, -1);
-            var rightCreation = branchCreationIndex.GetValueOrDefault(rightKey, -1);
-            if (leftCreation >= 0 && rightCreation >= 0 && leftCreation != rightCreation)
-                return rightCreation.CompareTo(leftCreation);
 
             var leftIndex = indexBySha.GetValueOrDefault(left.Head, int.MaxValue);
             var rightIndex = indexBySha.GetValueOrDefault(right.Head, int.MaxValue);
@@ -896,13 +895,10 @@ namespace SourceGit.Models
             Dictionary<string, Commit> commitBySha,
             Dictionary<string, int> indexBySha,
             Dictionary<string, BranchLane> ownedLaneByCommit,
-            Dictionary<string, List<string>> branchHeads,
-            bool isTagLane)
+            Dictionary<string, List<string>> branchHeads)
         {
             var visited = new HashSet<string>(StringComparer.Ordinal);
             var current = lane.Branch.Head;
-            var tagName = isTagLane ? lane.Name : null;
-
             while (!string.IsNullOrEmpty(current) &&
                 indexBySha.ContainsKey(current) &&
                 commitBySha.TryGetValue(current, out var commit) &&
@@ -913,82 +909,13 @@ namespace SourceGit.Models
                     break;
 
                 var parent = commit.Parents[0];
-                if (ShouldStopAtParent(parent, tagName, lane, commitBySha, ownedLaneByCommit, branchHeads))
+                if (!lane.IsPrimary && ShouldStopAtParent(parent, lane.Key, ownedLaneByCommit, branchHeads))
                 {
                     lane.ForkParent = parent;
                     break;
                 }
 
                 current = parent;
-            }
-        }
-
-        private static bool ShouldStopAtParent(
-            string parent,
-            string tagName,
-            BranchLane lane,
-            Dictionary<string, Commit> commitBySha,
-            Dictionary<string, BranchLane> ownedLaneByCommit,
-            Dictionary<string, List<string>> branchHeads)
-        {
-            if (tagName != null)
-            {
-                commitBySha.TryGetValue(parent, out var parentCommit);
-                var parentTag = parentCommit?.BranchTag;
-
-                // An explicit tag on the parent is authoritative: trust it completely,
-                // whether it confirms this branch or marks a fork into another one.
-                if (!string.IsNullOrEmpty(parentTag))
-                    return !string.Equals(parentTag, tagName, StringComparison.Ordinal);
-
-                // No tag on the parent means it predates tagging (legacy history) - fall
-                // through to the ref-based rule below so this lane still owns its full
-                // mainline instead of being truncated at the tagged tip.
-            }
-
-            return !lane.IsPrimary && ShouldStopAtParent(parent, lane.Key, ownedLaneByCommit, branchHeads);
-        }
-
-        // Flags branches whose *current* Head commit carries a matching "(#name)" branch
-        // tag, without fabricating any new Branch instance - so the real branch's own
-        // metadata (Upstream, Remote, etc.) is always preserved for rendering.
-        private static void ComputeTagLanes(
-            List<Branch> laneBranches,
-            List<Commit> commits,
-            out HashSet<string> tagBranchKeys,
-            out Dictionary<string, int> branchCreationIndex)
-        {
-            tagBranchKeys = new HashSet<string>(StringComparer.Ordinal);
-            branchCreationIndex = new Dictionary<string, int>(StringComparer.Ordinal);
-
-            var headShaByTag = new Dictionary<string, string>(StringComparer.Ordinal);
-            var creationIndexByTag = new Dictionary<string, int>(StringComparer.Ordinal);
-
-            for (var i = 0; i < commits.Count; i++)
-            {
-                var tag = commits[i].BranchTag;
-                if (string.IsNullOrEmpty(tag))
-                    continue;
-
-                if (!headShaByTag.ContainsKey(tag))
-                    headShaByTag[tag] = commits[i].SHA;
-
-                // Commits are ordered newest-first, so the largest index seen is the
-                // earliest (oldest) commit tagged with this branch - its "creation date".
-                if (!creationIndexByTag.TryGetValue(tag, out var oldestIndex) || i > oldestIndex)
-                    creationIndexByTag[tag] = i;
-            }
-
-            foreach (var branch in laneBranches)
-            {
-                var name = GetBranchName(branch);
-                if (!headShaByTag.TryGetValue(name, out var taggedHead) ||
-                    !string.Equals(taggedHead, branch.Head, StringComparison.Ordinal))
-                    continue;
-
-                var key = GetBranchKey(branch);
-                tagBranchKeys.Add(key);
-                branchCreationIndex[key] = creationIndexByTag[name];
             }
         }
 
@@ -1464,13 +1391,8 @@ namespace SourceGit.Models
                 // Calculate link position of this commit.
                 var position = new Point(getX(major.Lane), offsetY);
                 var dotColor = major.Lane % s_penCount;
-                var anchor = new Dot() { Center = position, Color = dotColor, IsHighlighted = isHighlighted };
-                if (commit.IsCurrentHead)
-                    anchor.Type = DotType.Head;
-                else if (commit.Parents.Count > 1)
-                    anchor.Type = DotType.Merge;
-                else
-                    anchor.Type = DotType.Default;
+                var anchor = new Dot() { Center = position, Color = dotColor, IsHighlighted = isHighlighted, IsInit = commit.Subject == BranchInit.CommitMessage, IsCurrentHead = commit.IsCurrentHead };
+                anchor.Type = commit.Parents.Count > 1 ? DotType.Merge : DotType.Default;
                 temp.Dots.Add(anchor);
 
                 // Deal with other parents (the first parent has been processed)

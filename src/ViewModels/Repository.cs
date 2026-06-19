@@ -1490,14 +1490,13 @@ namespace SourceGit.ViewModels
                 ShowPopup(new DeleteMultipleBranches(this, branches, isLocal));
         }
 
-        // Keeps the current branch's remote in sync: pushes immediately after every commit,
-        // setting upstream to the default remote on first push if none exists yet.
-        public async Task SilentPushCurrentBranchAsync(CommandLog log)
+        // Keeps a branch's remote in sync: pushes immediately after every commit, setting
+        // upstream to the default remote on first push if none exists yet.
+        public async Task SilentPushBranchAsync(Models.Branch branch, CommandLog log)
         {
-            if (IsBare || _remotes.Count == 0 || _currentBranch is null or { IsDetachedHead: true })
+            if (IsBare || _remotes.Count == 0 || branch is null or { IsDetachedHead: true })
                 return;
 
-            var branch = _currentBranch;
             string remoteName;
             string remoteBranchName;
             var setTracking = false;
@@ -1547,35 +1546,6 @@ namespace SourceGit.ViewModels
                     .ConfigureAwait(false);
         }
 
-        // Cleans up a branch left empty-handed after switching away from it: if it never
-        // received any commits of its own, delete it from both local and remote.
-        public async Task TryAutoDeleteEmptyBranchAsync(Models.Branch branch, CommandLog log)
-        {
-            if (branch is not { IsLocal: true, IsDetachedHead: false } || branch.IsCurrent || IsProtectedBranch(branch))
-                return;
-
-            var commits = _histories?.Commits;
-            if (commits == null || commits.Count == 0)
-                return;
-
-            var withoutOwnedCommits = Models.CommitGraph.FindBranchesWithoutOwnedCommits(commits, _branches);
-            if (!withoutOwnedCommits.Contains(branch))
-                return;
-
-            await new Commands.Branch(FullPath, branch.Name)
-                .Use(log)
-                .DeleteLocalAsync();
-
-            if (!string.IsNullOrEmpty(branch.Upstream))
-            {
-                var upstream = _branches.Find(x => !x.IsLocal && x.FullName == branch.Upstream);
-                if (upstream != null)
-                    await DeleteRemoteBranchAsync(upstream, log);
-            }
-
-            MarkBranchesDirtyManually();
-        }
-
         private List<Models.Branch> FindUnnecessaryLocalBranches()
         {
             var commits = _histories?.Commits;
@@ -1584,11 +1554,14 @@ namespace SourceGit.ViewModels
 
             var unnecessary = new List<Models.Branch>();
             var branchesWithoutOwnedCommits = Models.CommitGraph.FindBranchesWithoutOwnedCommits(commits, _branches);
-            foreach (var candidate in branchesWithoutOwnedCommits)
+            foreach (var candidate in _branches)
             {
                 if (candidate is not { IsLocal: true, IsDetachedHead: false } ||
                     candidate.IsCurrent ||
                     IsProtectedBranch(candidate))
+                    continue;
+
+                if (!branchesWithoutOwnedCommits.Contains(candidate))
                     continue;
 
                 unnecessary.Add(candidate);

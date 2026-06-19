@@ -213,6 +213,19 @@ namespace SourceGit.ViewModels
 
             if (succ)
             {
+                // Every branch gets an initial commit of its own (generic, no branch-specific
+                // content) so it's never left empty/unsynced after creation - it can be pushed
+                // immediately, and if it's ever emptied out again (commit removed), it gets
+                // cleaned up like any other branch without owned commits.
+                var initSha = await new Commands.CreateEmptyCommitOnRef(_repo.FullPath)
+                    .Use(log)
+                    .RunAsync(created.FullName, _baseOnRevision, Models.BranchInit.CommitMessage);
+                if (!string.IsNullOrEmpty(initSha))
+                {
+                    created.Head = initSha;
+                    created.CommitterDate = (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                }
+
                 if (BasedOn is Models.Branch { IsLocal: false } basedOn && _name.Equals(basedOn.Name, StringComparison.Ordinal))
                 {
                     await new Commands.Branch(_repo.FullPath, _name)
@@ -223,6 +236,7 @@ namespace SourceGit.ViewModels
                 }
 
                 _repo.RefreshAfterCreateBranch(created, CheckoutAfterCreated);
+                await _repo.SilentPushBranchAsync(created, log);
             }
             else
             {

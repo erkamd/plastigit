@@ -527,7 +527,7 @@ namespace SourceGit.ViewModels
                 await _inProgressContext.ContinueAsync(log);
 
                 if (wasMerging && !File.Exists(Path.Combine(_repo.GitDir, "MERGE_HEAD")))
-                    await _repo.SilentPushCurrentBranchAsync(log);
+                    await _repo.SilentPushBranchAsync(_repo.CurrentBranch, log);
 
                 log.Complete();
 
@@ -654,7 +654,7 @@ namespace SourceGit.ViewModels
                 await StageChangesAsync(_unstaged, null);
 
             var log = _repo.CreateLog("Commit");
-            var succ = await new Commands.Commit(_repo.FullPath, _commitMessage, _repo.CurrentBranch?.Name, EnableSignOff, NoVerifyOnCommit, _useAmend, _resetAuthor)
+            var succ = await new Commands.Commit(_repo.FullPath, _commitMessage, EnableSignOff, NoVerifyOnCommit, _useAmend, _resetAuthor)
                     .Use(log)
                     .RunAsync();
 
@@ -666,7 +666,7 @@ namespace SourceGit.ViewModels
                 CommitMessage = string.Empty;
 
                 var pushLog = _repo.CreateLog("Push");
-                await _repo.SilentPushCurrentBranchAsync(pushLog);
+                await _repo.SilentPushBranchAsync(_repo.CurrentBranch, pushLog);
                 pushLog.Complete();
             }
 
@@ -750,8 +750,21 @@ namespace SourceGit.ViewModels
 
                 if (succ)
                 {
+                    // Same as a plain "Create Branch": give the new branch its own generic
+                    // init commit first, then make the user's real commit on top of it.
+                    var initSha = await new Commands.CreateEmptyCommitOnRef(_repo.FullPath)
+                        .Use(log)
+                        .RunAsync(created.FullName, baseRevision, Models.BranchInit.CommitMessage);
+                    succ = !string.IsNullOrEmpty(initSha);
+
+                    if (succ)
+                        created.Head = initSha;
+                }
+
+                if (succ)
+                {
                     _repo.RefreshAfterCreateBranch(created, true);
-                    succ = await new Commands.Commit(_repo.FullPath, _commitMessage, branchName, EnableSignOff, NoVerifyOnCommit, false, false)
+                    succ = await new Commands.Commit(_repo.FullPath, _commitMessage, EnableSignOff, NoVerifyOnCommit, false, false)
                         .Use(log)
                         .RunAsync();
                 }
@@ -759,7 +772,7 @@ namespace SourceGit.ViewModels
                 if (succ)
                 {
                     CommitMessage = string.Empty;
-                    await _repo.SilentPushCurrentBranchAsync(log);
+                    await _repo.SilentPushBranchAsync(_repo.CurrentBranch, log);
                 }
                 else
                 {
