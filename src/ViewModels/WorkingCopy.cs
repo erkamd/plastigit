@@ -633,7 +633,7 @@ namespace SourceGit.ViewModels
                 await StageChangesAsync(_unstaged, null);
 
             var log = _repo.CreateLog("Commit");
-            var succ = await new Commands.Commit(_repo.FullPath, _commitMessage, EnableSignOff, NoVerifyOnCommit, _useAmend, _resetAuthor)
+            var succ = await new Commands.Commit(_repo.FullPath, _commitMessage, _repo.CurrentBranch?.Name, EnableSignOff, NoVerifyOnCommit, _useAmend, _resetAuthor)
                     .Use(log)
                     .RunAsync();
 
@@ -739,7 +739,7 @@ namespace SourceGit.ViewModels
                 if (succ)
                 {
                     _repo.RefreshAfterCreateBranch(created, true);
-                    succ = await new Commands.Commit(_repo.FullPath, _commitMessage, EnableSignOff, NoVerifyOnCommit, false, false)
+                    succ = await new Commands.Commit(_repo.FullPath, _commitMessage, branchName, EnableSignOff, NoVerifyOnCommit, false, false)
                         .Use(log)
                         .RunAsync();
                 }
