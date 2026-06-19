@@ -68,6 +68,16 @@ namespace SourceGit.ViewModels
             private set => SetProperty(ref _isCommitting, value);
         }
 
+        public bool IsCurrentBranchProtected
+        {
+            get => _repo.CurrentBranch != null && _repo.IsProtectedBranch(_repo.CurrentBranch);
+        }
+
+        public void NotifyCurrentBranchChanged()
+        {
+            OnPropertyChanged(nameof(IsCurrentBranchProtected));
+        }
+
         public bool EnableSignOff
         {
             get => _repo.UIStates.EnableSignOffForCommit;
@@ -512,8 +522,13 @@ namespace SourceGit.ViewModels
                 if (File.Exists(mergeMsgFile) && !string.IsNullOrWhiteSpace(_commitMessage))
                     await File.WriteAllTextAsync(mergeMsgFile, _commitMessage);
 
+                var wasMerging = _inProgressContext is MergeInProgress;
                 var log = _repo.CreateLog($"Continue {_inProgressContext.Name}");
                 await _inProgressContext.ContinueAsync(log);
+
+                if (wasMerging && !File.Exists(Path.Combine(_repo.GitDir, "MERGE_HEAD")))
+                    await _repo.SilentPushCurrentBranchAsync(log);
+
                 log.Complete();
 
                 CommitMessage = string.Empty;
@@ -585,6 +600,12 @@ namespace SourceGit.ViewModels
             if (!_repo.CanCreatePopup())
             {
                 _repo.SendNotification("Repository has an unfinished job! Please wait!", true);
+                return;
+            }
+
+            if (IsCurrentBranchProtected)
+            {
+                _repo.SendNotification($"'{_repo.CurrentBranch.Name}' is a protected branch! Create a new branch and merge it back instead of committing directly.", true);
                 return;
             }
 

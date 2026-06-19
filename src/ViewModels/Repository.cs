@@ -165,6 +165,7 @@ namespace SourceGit.ViewModels
                     _histories?.NotifyCurrentBranchChanged();
                     if (value != null && !value.Head.Equals(oldHead, StringComparison.Ordinal) && _workingCopy is { UseAmend: true })
                         _workingCopy.UseAmend = false;
+                    _workingCopy?.NotifyCurrentBranchChanged();
                 }
             }
         }
