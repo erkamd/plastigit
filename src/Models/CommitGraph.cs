@@ -267,8 +267,7 @@ namespace SourceGit.Models
                 commit.LeftMargin = 0;
             }
 
-            var tagBranches = BuildTagBranches(commits, commitBySha, out var tagBranchKeys, out var branchCreationIndex);
-            var visibleBranches = BuildVisibleBranches(commits, branches, tagBranches, indexBySha);
+            var visibleBranches = BuildVisibleBranches(commits, branches, indexBySha);
             if (visibleBranches.Count == 0)
                 return graph;
 
@@ -284,6 +283,8 @@ namespace SourceGit.Models
                 if (!pairedRemoteKeys.Contains(GetBranchKey(branch)))
                     laneBranches.Add(branch);
             }
+
+            ComputeTagLanes(laneBranches, commits, out var tagBranchKeys, out var branchCreationIndex);
 
             var primaryKey = GetBranchKey(SelectPrimaryBranch(laneBranches));
             laneBranches.Sort((l, r) => CompareBranches(l, r, primaryKey, indexBySha, branchCreationIndex));
@@ -560,7 +561,7 @@ namespace SourceGit.Models
                 indexBySha[commit.SHA] = i;
             }
 
-            var visibleBranches = BuildVisibleBranches(commits, branches, [], indexBySha);
+            var visibleBranches = BuildVisibleBranches(commits, branches, indexBySha);
             if (visibleBranches.Count == 0)
                 return result;
 
@@ -666,16 +667,10 @@ namespace SourceGit.Models
             }
         }
 
-        private static List<Branch> BuildVisibleBranches(List<Commit> commits, List<Branch> branches, List<Branch> tagBranches, Dictionary<string, int> indexBySha)
+        private static List<Branch> BuildVisibleBranches(List<Commit> commits, List<Branch> branches, Dictionary<string, int> indexBySha)
         {
             var visible = new List<Branch>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
-
-            foreach (var branch in tagBranches)
-            {
-                if (seen.Add(GetBranchKey(branch)))
-                    visible.Add(branch);
-            }
 
             if (branches != null)
             {
@@ -906,31 +901,7 @@ namespace SourceGit.Models
         {
             var visited = new HashSet<string>(StringComparer.Ordinal);
             var current = lane.Branch.Head;
-
-            if (isTagLane)
-            {
-                var tagName = lane.Name;
-                while (!string.IsNullOrEmpty(current) &&
-                    commitBySha.TryGetValue(current, out var commit) &&
-                    visited.Add(current))
-                {
-                    lane.Commits.Add(current);
-                    if (commit.Parents.Count == 0)
-                        break;
-
-                    var parent = commit.Parents[0];
-                    if (!commitBySha.TryGetValue(parent, out var parentCommit) ||
-                        !string.Equals(parentCommit.BranchTag, tagName, StringComparison.Ordinal))
-                    {
-                        lane.ForkParent = parent;
-                        break;
-                    }
-
-                    current = parent;
-                }
-
-                return;
-            }
+            var tagName = isTagLane ? lane.Name : null;
 
             while (!string.IsNullOrEmpty(current) &&
                 indexBySha.ContainsKey(current) &&
@@ -942,7 +913,7 @@ namespace SourceGit.Models
                     break;
 
                 var parent = commit.Parents[0];
-                if (!lane.IsPrimary && ShouldStopAtParent(parent, lane.Key, ownedLaneByCommit, branchHeads))
+                if (ShouldStopAtParent(parent, tagName, lane, commitBySha, ownedLaneByCommit, branchHeads))
                 {
                     lane.ForkParent = parent;
                     break;
@@ -952,17 +923,44 @@ namespace SourceGit.Models
             }
         }
 
-        private static List<Branch> BuildTagBranches(
-            List<Commit> commits,
+        private static bool ShouldStopAtParent(
+            string parent,
+            string tagName,
+            BranchLane lane,
             Dictionary<string, Commit> commitBySha,
+            Dictionary<string, BranchLane> ownedLaneByCommit,
+            Dictionary<string, List<string>> branchHeads)
+        {
+            if (tagName != null)
+            {
+                commitBySha.TryGetValue(parent, out var parentCommit);
+                var parentTag = parentCommit?.BranchTag;
+
+                // An explicit tag on the parent is authoritative: trust it completely,
+                // whether it confirms this branch or marks a fork into another one.
+                if (!string.IsNullOrEmpty(parentTag))
+                    return !string.Equals(parentTag, tagName, StringComparison.Ordinal);
+
+                // No tag on the parent means it predates tagging (legacy history) - fall
+                // through to the ref-based rule below so this lane still owns its full
+                // mainline instead of being truncated at the tagged tip.
+            }
+
+            return !lane.IsPrimary && ShouldStopAtParent(parent, lane.Key, ownedLaneByCommit, branchHeads);
+        }
+
+        // Flags branches whose *current* Head commit carries a matching "(#name)" branch
+        // tag, without fabricating any new Branch instance - so the real branch's own
+        // metadata (Upstream, Remote, etc.) is always preserved for rendering.
+        private static void ComputeTagLanes(
+            List<Branch> laneBranches,
+            List<Commit> commits,
             out HashSet<string> tagBranchKeys,
             out Dictionary<string, int> branchCreationIndex)
         {
-            var result = new List<Branch>();
             tagBranchKeys = new HashSet<string>(StringComparer.Ordinal);
             branchCreationIndex = new Dictionary<string, int>(StringComparer.Ordinal);
 
-            var headIndexByTag = new Dictionary<string, int>(StringComparer.Ordinal);
             var headShaByTag = new Dictionary<string, string>(StringComparer.Ordinal);
             var creationIndexByTag = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -972,11 +970,8 @@ namespace SourceGit.Models
                 if (string.IsNullOrEmpty(tag))
                     continue;
 
-                if (!headIndexByTag.TryGetValue(tag, out var bestIndex) || i < bestIndex)
-                {
-                    headIndexByTag[tag] = i;
+                if (!headShaByTag.ContainsKey(tag))
                     headShaByTag[tag] = commits[i].SHA;
-                }
 
                 // Commits are ordered newest-first, so the largest index seen is the
                 // earliest (oldest) commit tagged with this branch - its "creation date".
@@ -984,27 +979,17 @@ namespace SourceGit.Models
                     creationIndexByTag[tag] = i;
             }
 
-            foreach (var (tag, head) in headShaByTag)
+            foreach (var branch in laneBranches)
             {
-                if (!commitBySha.TryGetValue(head, out var headCommit))
+                var name = GetBranchName(branch);
+                if (!headShaByTag.TryGetValue(name, out var taggedHead) ||
+                    !string.Equals(taggedHead, branch.Head, StringComparison.Ordinal))
                     continue;
 
-                var branch = new Branch()
-                {
-                    Name = tag,
-                    FullName = $"refs/heads/{tag}",
-                    Head = head,
-                    IsCurrent = headCommit.IsCurrentHead,
-                    IsLocal = true,
-                };
-
                 var key = GetBranchKey(branch);
-                result.Add(branch);
                 tagBranchKeys.Add(key);
-                branchCreationIndex[key] = creationIndexByTag[tag];
+                branchCreationIndex[key] = creationIndexByTag[name];
             }
-
-            return result;
         }
 
         private static bool ShouldStopAtParent(
