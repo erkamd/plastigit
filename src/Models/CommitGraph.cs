@@ -257,7 +257,6 @@ namespace SourceGit.Models
 
             var commitBySha = new Dictionary<string, Commit>(StringComparer.Ordinal);
             var indexBySha = new Dictionary<string, int>(StringComparer.Ordinal);
-            var childCountByParent = new Dictionary<string, int>(StringComparer.Ordinal);
             for (int i = 0; i < commits.Count; i++)
             {
                 var commit = commits[i];
@@ -266,9 +265,6 @@ namespace SourceGit.Models
                 commit.IsHighlightedInGraph = false;
                 commit.Color = 0;
                 commit.LeftMargin = 0;
-
-                foreach (var parent in commit.Parents)
-                    childCountByParent[parent] = childCountByParent.GetValueOrDefault(parent) + 1;
             }
 
             var visibleBranches = BuildVisibleBranches(commits, branches, indexBySha);
@@ -346,7 +342,7 @@ namespace SourceGit.Models
                     lane.UpstreamCommits = CollectCommitsFromHead(lane.UpstreamBranch.Head, commitBySha);
 
                 if (lane.OwnsHeadChain)
-                    BuildOwnedChain(lane, commitBySha, indexBySha, childCountByParent, branchHeads);
+                    BuildOwnedChain(lane, commitBySha, indexBySha, ownedLaneByCommit, branchHeads);
 
                 if (lane.Commits.Count == 0 && !lane.Branch.IsCurrent)
                 {
@@ -556,15 +552,11 @@ namespace SourceGit.Models
 
             var commitBySha = new Dictionary<string, Commit>(StringComparer.Ordinal);
             var indexBySha = new Dictionary<string, int>(StringComparer.Ordinal);
-            var childCountByParent = new Dictionary<string, int>(StringComparer.Ordinal);
             for (int i = 0; i < commits.Count; i++)
             {
                 var commit = commits[i];
                 commitBySha[commit.SHA] = commit;
                 indexBySha[commit.SHA] = i;
-
-                foreach (var parent in commit.Parents)
-                    childCountByParent[parent] = childCountByParent.GetValueOrDefault(parent) + 1;
             }
 
             var visibleBranches = BuildVisibleBranches(commits, branches, indexBySha);
@@ -615,7 +607,7 @@ namespace SourceGit.Models
                 };
 
                 if (lane.OwnsHeadChain)
-                    BuildOwnedChain(lane, commitBySha, indexBySha, childCountByParent, branchHeads);
+                    BuildOwnedChain(lane, commitBySha, indexBySha, ownedLaneByCommit, branchHeads);
 
                 if (lane.Commits.Count == 0 && !lane.Branch.IsCurrent)
                 {
@@ -877,7 +869,11 @@ namespace SourceGit.Models
             var leftIndex = indexBySha.GetValueOrDefault(left.Head, int.MaxValue);
             var rightIndex = indexBySha.GetValueOrDefault(right.Head, int.MaxValue);
             if (leftIndex != rightIndex)
-                return leftIndex.CompareTo(rightIndex);
+            {
+                // Commits are ordered newest-first. Put the older branch head first so
+                // a descendant branch is allocated to a lower lane than its parent.
+                return rightIndex.CompareTo(leftIndex);
+            }
 
             if (left.IsLocal != right.IsLocal)
                 return left.IsLocal ? -1 : 1;
@@ -889,7 +885,7 @@ namespace SourceGit.Models
             BranchLane lane,
             Dictionary<string, Commit> commitBySha,
             Dictionary<string, int> indexBySha,
-            Dictionary<string, int> childCountByParent,
+            Dictionary<string, BranchLane> ownedLaneByCommit,
             Dictionary<string, List<string>> branchHeads)
         {
             var visited = new HashSet<string>(StringComparer.Ordinal);
@@ -904,7 +900,7 @@ namespace SourceGit.Models
                     break;
 
                 var parent = commit.Parents[0];
-                if (!lane.IsPrimary && ShouldStopAtParent(parent, lane.Key, childCountByParent, branchHeads))
+                if (!lane.IsPrimary && ShouldStopAtParent(parent, lane.Key, ownedLaneByCommit, branchHeads))
                 {
                     lane.ForkParent = parent;
                     break;
@@ -917,9 +913,12 @@ namespace SourceGit.Models
         private static bool ShouldStopAtParent(
             string parent,
             string branchKey,
-            Dictionary<string, int> childCountByParent,
+            Dictionary<string, BranchLane> ownedLaneByCommit,
             Dictionary<string, List<string>> branchHeads)
         {
+            if (ownedLaneByCommit.ContainsKey(parent))
+                return true;
+
             if (branchHeads.TryGetValue(parent, out var branches))
             {
                 foreach (var key in branches)
@@ -929,7 +928,7 @@ namespace SourceGit.Models
                 }
             }
 
-            return childCountByParent.GetValueOrDefault(parent) > 1;
+            return false;
         }
 
         private static int GetBranchColor(Branch branch, int fallback, IReadOnlyDictionary<string, int> branchColors)
