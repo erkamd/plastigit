@@ -1489,6 +1489,92 @@ namespace SourceGit.ViewModels
                 ShowPopup(new DeleteMultipleBranches(this, branches, isLocal));
         }
 
+        // Keeps the current branch's remote in sync: pushes immediately after every commit,
+        // setting upstream to the default remote on first push if none exists yet.
+        public async Task SilentPushCurrentBranchAsync(CommandLog log)
+        {
+            if (IsBare || _remotes.Count == 0 || _currentBranch is null or { IsDetachedHead: true })
+                return;
+
+            var branch = _currentBranch;
+            string remoteName;
+            string remoteBranchName;
+            var setTracking = false;
+
+            if (!string.IsNullOrEmpty(branch.Upstream) && !branch.IsUpstreamGone)
+            {
+                var upstream = _branches.Find(x => !x.IsLocal && x.FullName == branch.Upstream);
+                if (upstream == null)
+                    return;
+
+                remoteName = upstream.Remote;
+                remoteBranchName = upstream.Name;
+            }
+            else
+            {
+                remoteName = !string.IsNullOrEmpty(_settings.DefaultRemote) && _remotes.Exists(x => x.Name == _settings.DefaultRemote)
+                    ? _settings.DefaultRemote
+                    : _remotes[0].Name;
+                remoteBranchName = branch.Name;
+                setTracking = true;
+            }
+
+            var succ = await new Commands.Push(FullPath, branch.Name, remoteName, remoteBranchName, false, _submodules.Count > 0, setTracking, false)
+                .Use(log)
+                .RunAsync();
+
+            if (succ && setTracking)
+                branch.Upstream = $"refs/remotes/{remoteName}/{remoteBranchName}";
+        }
+
+        // Deletes a remote branch, used to keep local/remote branches in sync on delete.
+        public async Task DeleteRemoteBranchAsync(Models.Branch remoteBranch, CommandLog log)
+        {
+            var exists = await new Commands.Remote(FullPath)
+                .HasBranchAsync(remoteBranch.Remote, remoteBranch.Name)
+                .ConfigureAwait(false);
+
+            if (exists)
+                await new Commands.Push(FullPath, remoteBranch.Remote, $"refs/heads/{remoteBranch.Name}", true)
+                    .Use(log)
+                    .RunAsync()
+                    .ConfigureAwait(false);
+            else
+                await new Commands.Branch(FullPath, remoteBranch.Name)
+                    .Use(log)
+                    .DeleteRemoteAsync(remoteBranch.Remote)
+                    .ConfigureAwait(false);
+        }
+
+        // Cleans up a branch left empty-handed after switching away from it: if it never
+        // received any commits of its own, delete it from both local and remote.
+        public async Task TryAutoDeleteEmptyBranchAsync(Models.Branch branch, CommandLog log)
+        {
+            if (branch is not { IsLocal: true, IsDetachedHead: false } || branch.IsCurrent || IsProtectedBranch(branch))
+                return;
+
+            var commits = _histories?.Commits;
+            if (commits == null || commits.Count == 0)
+                return;
+
+            var withoutOwnedCommits = Models.CommitGraph.FindBranchesWithoutOwnedCommits(commits, _branches);
+            if (!withoutOwnedCommits.Contains(branch))
+                return;
+
+            await new Commands.Branch(FullPath, branch.Name)
+                .Use(log)
+                .DeleteLocalAsync();
+
+            if (!string.IsNullOrEmpty(branch.Upstream))
+            {
+                var upstream = _branches.Find(x => !x.IsLocal && x.FullName == branch.Upstream);
+                if (upstream != null)
+                    await DeleteRemoteBranchAsync(upstream, log);
+            }
+
+            MarkBranchesDirtyManually();
+        }
+
         private List<Models.Branch> FindUnnecessaryLocalBranches()
         {
             var commits = _histories?.Commits;

@@ -577,7 +577,7 @@ namespace SourceGit.ViewModels
                 _repo.Settings.CommitMessages.Clear();
         }
 
-        public async Task CommitAsync(bool autoStage, bool autoPush)
+        public async Task CommitAsync(bool autoStage)
         {
             if (string.IsNullOrWhiteSpace(_commitMessage))
                 return;
@@ -644,18 +644,9 @@ namespace SourceGit.ViewModels
                 UseAmend = false;
                 CommitMessage = string.Empty;
 
-                if (autoPush && _repo.Remotes.Count > 0)
-                {
-                    Models.Branch pushBranch = null;
-                    if (_repo.CurrentBranch == null)
-                    {
-                        var currentBranchName = await new Commands.QueryCurrentBranch(_repo.FullPath).GetResultAsync();
-                        pushBranch = new Models.Branch() { Name = currentBranchName };
-                    }
-
-                    if (_repo.CanCreatePopup())
-                        await _repo.ShowAndStartPopupAsync(new Push(_repo, pushBranch));
-                }
+                var pushLog = _repo.CreateLog("Push");
+                await _repo.SilentPushCurrentBranchAsync(pushLog);
+                pushLog.Complete();
             }
 
             _repo.MarkBranchesDirtyManually();
@@ -744,17 +735,17 @@ namespace SourceGit.ViewModels
                         .RunAsync();
                 }
 
-                log.Complete();
-
                 if (succ)
                 {
                     CommitMessage = string.Empty;
+                    await _repo.SilentPushCurrentBranchAsync(log);
                 }
                 else
                 {
                     _repo.MarkWorkingCopyDirtyManually();
                 }
 
+                log.Complete();
                 _repo.MarkBranchesDirtyManually();
             }
             finally

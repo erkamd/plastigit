@@ -236,7 +236,7 @@ namespace SourceGit.Views
                 return;
 
             if (DataContext is ViewModels.WorkingCopy vm)
-                await vm.CommitAsync(false, false);
+                await vm.CommitAsync(false);
 
             e.Handled = true;
         }
@@ -262,7 +262,7 @@ namespace SourceGit.Views
                 return;
 
             if (DataContext is ViewModels.WorkingCopy vm)
-                await vm.CommitAsync(true, false);
+                await vm.CommitAsync(true);
 
             e.Handled = true;
         }
@@ -273,7 +273,7 @@ namespace SourceGit.Views
                 return;
 
             if (DataContext is ViewModels.WorkingCopy vm)
-                await vm.CommitAsync(false, true);
+                await vm.CommitAsync(false);
 
             e.Handled = true;
         }

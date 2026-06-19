@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 
 namespace SourceGit.ViewModels
 {
@@ -14,16 +14,15 @@ namespace SourceGit.ViewModels
             get;
         }
 
-        public string DeleteTrackingRemoteTip
+        public Models.Branch TrackingLocalBranch
+        {
+            get;
+        }
+
+        public string SyncedDeleteTip
         {
             get;
             private set;
-        }
-
-        public bool AlsoDeleteTrackingRemote
-        {
-            get => _alsoDeleteTrackingRemote;
-            set => SetProperty(ref _alsoDeleteTrackingRemote, value);
         }
 
         public DeleteBranch(Repository repo, Models.Branch branch)
@@ -31,11 +30,20 @@ namespace SourceGit.ViewModels
             _repo = repo;
             Target = branch;
 
-            if (branch.IsLocal && !string.IsNullOrEmpty(branch.Upstream))
+            if (branch.IsLocal)
             {
-                TrackingRemoteBranch = repo.Branches.Find(x => x.FullName == branch.Upstream);
-                if (TrackingRemoteBranch != null)
-                    DeleteTrackingRemoteTip = App.Text("DeleteBranch.WithTrackingRemote", TrackingRemoteBranch.FriendlyName);
+                if (!string.IsNullOrEmpty(branch.Upstream))
+                {
+                    TrackingRemoteBranch = repo.Branches.Find(x => x.FullName == branch.Upstream);
+                    if (TrackingRemoteBranch != null)
+                        SyncedDeleteTip = App.Text("DeleteBranch.WithTrackingRemote", TrackingRemoteBranch.FriendlyName);
+                }
+            }
+            else
+            {
+                TrackingLocalBranch = repo.Branches.Find(x => x.IsLocal && x.Upstream == branch.FullName);
+                if (TrackingLocalBranch != null)
+                    SyncedDeleteTip = App.Text("DeleteBranch.WithTrackingLocal", TrackingLocalBranch.FriendlyName);
             }
         }
 
@@ -54,16 +62,24 @@ namespace SourceGit.ViewModels
                     .DeleteLocalAsync();
                 _repo.UIStates.RemoveHistoryFilter(Target.FullName, Models.FilterType.LocalBranch);
 
-                if (_alsoDeleteTrackingRemote && TrackingRemoteBranch != null)
+                if (TrackingRemoteBranch != null)
                 {
-                    await DeleteRemoteBranchAsync(TrackingRemoteBranch, log);
+                    await _repo.DeleteRemoteBranchAsync(TrackingRemoteBranch, log);
                     _repo.UIStates.RemoveHistoryFilter(TrackingRemoteBranch.FullName, Models.FilterType.RemoteBranch);
                 }
             }
             else
             {
-                await DeleteRemoteBranchAsync(Target, log);
+                await _repo.DeleteRemoteBranchAsync(Target, log);
                 _repo.UIStates.RemoveHistoryFilter(Target.FullName, Models.FilterType.RemoteBranch);
+
+                if (TrackingLocalBranch != null)
+                {
+                    await new Commands.Branch(_repo.FullPath, TrackingLocalBranch.Name)
+                        .Use(log)
+                        .DeleteLocalAsync();
+                    _repo.UIStates.RemoveHistoryFilter(TrackingLocalBranch.FullName, Models.FilterType.LocalBranch);
+                }
             }
 
             log.Complete();
@@ -71,25 +87,6 @@ namespace SourceGit.ViewModels
             return true;
         }
 
-        private async Task DeleteRemoteBranchAsync(Models.Branch branch, CommandLog log)
-        {
-            var exists = await new Commands.Remote(_repo.FullPath)
-                .HasBranchAsync(branch.Remote, branch.Name)
-                .ConfigureAwait(false);
-
-            if (exists)
-                await new Commands.Push(_repo.FullPath, branch.Remote, $"refs/heads/{branch.Name}", true)
-                    .Use(log)
-                    .RunAsync()
-                    .ConfigureAwait(false);
-            else
-                await new Commands.Branch(_repo.FullPath, branch.Name)
-                    .Use(log)
-                    .DeleteRemoteAsync(branch.Remote)
-                    .ConfigureAwait(false);
-        }
-
         private readonly Repository _repo = null;
-        private bool _alsoDeleteTrackingRemote = false;
     }
 }

@@ -39,6 +39,7 @@ namespace SourceGit.ViewModels
         public override async Task<bool> Sure()
         {
             using var lockWatcher = _repo.LockWatcher();
+            var previousBranch = _repo.CurrentBranch;
             ProgressDescription = $"Checkout and Fast-Forward '{LocalBranch.Name}' ...";
 
             var log = _repo.CreateLog($"Checkout and Fast-Forward '{LocalBranch.Name}' ...");
@@ -108,6 +109,7 @@ namespace SourceGit.ViewModels
                 LocalBranch.CommitterDate = RemoteBranch.CommitterDate;
 
                 _repo.RefreshAfterCheckoutBranch(LocalBranch);
+                await _repo.TryAutoDeleteEmptyBranchAsync(previousBranch, log);
             }
             else
             {

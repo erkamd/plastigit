@@ -34,6 +34,7 @@ namespace SourceGit.ViewModels
         {
             using var lockWatcher = _repo.LockWatcher();
             var branchName = BranchName;
+            var previousBranch = _repo.CurrentBranch;
             ProgressDescription = $"Checkout '{branchName}' ...";
 
             var log = _repo.CreateLog($"Checkout '{branchName}'");
@@ -99,6 +100,7 @@ namespace SourceGit.ViewModels
                         .PopAsync("stash@{0}");
 
                 _repo.RefreshAfterCheckoutBranch(_branch);
+                await _repo.TryAutoDeleteEmptyBranchAsync(previousBranch, log);
             }
             else
             {
