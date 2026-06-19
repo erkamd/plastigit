@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace SourceGit.Models
@@ -21,7 +22,27 @@ namespace SourceGit.Models
         public ulong AuthorTime { get; set; } = 0;
         public User Committer { get; set; } = User.Invalid;
         public ulong CommitterTime { get; set; } = 0;
-        public string Subject { get; set; } = string.Empty;
+        public string Subject
+        {
+            get => _subject;
+            set
+            {
+                var match = BranchTagRegex.Match(value ?? string.Empty);
+                if (match.Success)
+                {
+                    BranchTag = match.Groups[1].Value;
+                    _subject = match.Groups[2].Value;
+                }
+                else
+                {
+                    BranchTag = null;
+                    _subject = value ?? string.Empty;
+                }
+            }
+        }
+
+        public string BranchTag { get; private set; } = null;
+
         public List<string> Parents { get; set; } = new();
         public List<Decorator> Decorators { get; set; } = new();
 
@@ -127,6 +148,9 @@ namespace SourceGit.Models
         }
 
         private bool _isHighlightedInGraph = false;
+        private string _subject = string.Empty;
+
+        private static readonly Regex BranchTagRegex = new(@"^\(#([^()]+)\)(.*)$", RegexOptions.Compiled | RegexOptions.Singleline);
     }
 
     public class CommitFullMessage
