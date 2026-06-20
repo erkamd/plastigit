@@ -768,6 +768,7 @@
   <x:String x:Key="Text.RenameBranch.Target" xml:space="preserve">Branch:</x:String>
   <x:String x:Key="Text.Repository.Abort" xml:space="preserve">ABORT</x:String>
   <x:String x:Key="Text.Repository.AutoFetching" xml:space="preserve">Auto fetching changes from remotes...</x:String>
+  <x:String x:Key="Text.Repository.AutoSync" xml:space="preserve">Auto-Sync (fetch &amp; push). Click to toggle.</x:String>
   <x:String x:Key="Text.Repository.BranchSort" xml:space="preserve">Sort</x:String>
   <x:String x:Key="Text.Repository.BranchSort.ByCommitterDate" xml:space="preserve">By Committer Date</x:String>
   <x:String x:Key="Text.Repository.BranchSort.ByName" xml:space="preserve">By Name</x:String>

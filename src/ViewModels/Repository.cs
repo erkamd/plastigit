@@ -419,6 +419,18 @@ namespace SourceGit.ViewModels
             private set => SetProperty(ref _isAutoFetching, value);
         }
 
+        public bool IsAutoSyncEnabled
+        {
+            get => Preferences.Instance.EnableAutoFetch && Preferences.Instance.EnableAutoPush;
+            set
+            {
+                Preferences.Instance.EnableAutoFetch = value;
+                Preferences.Instance.EnableAutoPush = value;
+                Preferences.Instance.Save();
+                OnPropertyChanged();
+            }
+        }
+
         public AvaloniaList<Models.IssueTracker> IssueTrackers
         {
             get;
@@ -1494,7 +1506,7 @@ namespace SourceGit.ViewModels
         // upstream to the default remote on first push if none exists yet.
         public async Task SilentPushBranchAsync(Models.Branch branch, CommandLog log)
         {
-            if (IsBare || _remotes.Count == 0 || branch is null or { IsDetachedHead: true })
+            if (!Preferences.Instance.EnableAutoPush || IsBare || _remotes.Count == 0 || branch is null or { IsDetachedHead: true })
                 return;
 
             string remoteName;
@@ -1644,6 +1656,11 @@ namespace SourceGit.ViewModels
         {
             if (CanCreatePopup())
                 ShowPopup(new DeleteRemote(this, remote));
+        }
+
+        public void ToggleAutoSync()
+        {
+            IsAutoSyncEnabled = !IsAutoSyncEnabled;
         }
 
         public async Task ToggleAutoFetchOnRemoteAsync(Models.Remote remote)
