@@ -6,10 +6,10 @@ namespace SourceGit.Commands
 {
     public class Commit : Command
     {
-        public Commit(string repo, string message, string branchName, bool signOff, bool noVerify, bool amend, bool resetAuthor)
+        public Commit(string repo, string message, bool signOff, bool noVerify, bool amend, bool resetAuthor)
         {
             _tmpFile = Path.GetTempFileName();
-            _message = string.IsNullOrEmpty(branchName) ? message : $"(#{branchName}){message}";
+            _message = message;
 
             WorkingDirectory = repo;
             Context = repo;

@@ -1282,7 +1282,15 @@ namespace SourceGit.Views
             deleteCommit.Click += async (_, e) =>
             {
                 if (deleteTarget is { IsValidated: true })
-                    await DeleteBranchTipCommitAsync(repo, vm, deleteTarget);
+                {
+                    // Removing a branch's auto-generated init commit leaves it with no
+                    // commits of its own - delete the whole branch (synced both sides)
+                    // instead of resetting it to an empty state.
+                    if (commit.Subject == Models.BranchInit.CommitMessage)
+                        await DeleteEmptiedBranchAsync(repo, deleteTarget);
+                    else
+                        await DeleteBranchTipCommitAsync(repo, vm, deleteTarget);
+                }
 
                 e.Handled = true;
             };
@@ -1405,6 +1413,59 @@ namespace SourceGit.Views
             }
 
             return false;
+        }
+
+        private async Task DeleteEmptiedBranchAsync(ViewModels.Repository repo, DeleteCommitTarget target)
+        {
+            if (target is not { IsValidated: true } || !repo.CanCreatePopup())
+                return;
+
+            var validation = await ValidateDeleteCommitAsync(repo, target, true, true);
+            if (!validation.IsAllowed)
+            {
+                if (!string.IsNullOrEmpty(validation.Error))
+                    repo.SendNotification(validation.Error, true);
+                return;
+            }
+
+            var branch = repo.Branches.Find(x =>
+                x.IsLocal &&
+                x.FullName.Equals(target.Branch.FullName, StringComparison.Ordinal));
+            if (branch == null)
+                return;
+
+            // Can't delete the branch you're currently on - switch away first, to whatever
+            // branch already sits at the fork point, or detach onto it directly otherwise.
+            if (branch.IsCurrent && !repo.IsBare)
+            {
+                var destination = repo.Branches.Find(x =>
+                    x.IsLocal &&
+                    !x.FullName.Equals(branch.FullName, StringComparison.Ordinal) &&
+                    x.Head.Equals(target.ParentSHA, StringComparison.Ordinal));
+
+                var log = repo.CreateLog($"Switch away from '{branch.Name}' before deletion");
+                bool switched;
+                if (destination != null)
+                {
+                    switched = await new Commands.Checkout(repo.FullPath).Use(log).BranchAsync(destination.Name, false);
+                }
+                else
+                {
+                    switched = await new Commands.Checkout(repo.FullPath).Use(log).CommitAsync(target.ParentSHA, false);
+                }
+                log.Complete();
+
+                if (!switched)
+                {
+                    repo.SendNotification($"Failed to switch away from '{branch.Name}'. Branch deletion was cancelled.", true);
+                    return;
+                }
+
+                repo.MarkBranchesDirtyManually();
+                repo.MarkWorkingCopyDirtyManually();
+            }
+
+            repo.DeleteBranch(branch);
         }
 
         private async Task DeleteBranchTipCommitAsync(ViewModels.Repository repo, ViewModels.Histories vm, DeleteCommitTarget target)

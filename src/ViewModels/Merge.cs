@@ -115,7 +115,7 @@ namespace SourceGit.ViewModels
                 await _repo.AutoUpdateSubmodulesAsync(log);
 
                 if (Mode != Models.MergeMode.Squash && Mode != Models.MergeMode.DontCommit)
-                    await _repo.SilentPushCurrentBranchAsync(log);
+                    await _repo.SilentPushBranchAsync(_repo.CurrentBranch, log);
             }
 
             log.Complete();

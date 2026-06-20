@@ -56,7 +56,7 @@ namespace SourceGit.ViewModels
                 .ExecAsync();
 
             if (succ && AutoCommit)
-                await _repo.SilentPushCurrentBranchAsync(log);
+                await _repo.SilentPushBranchAsync(_repo.CurrentBranch, log);
 
             log.Complete();
             return true;
