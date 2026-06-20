@@ -371,6 +371,12 @@ namespace SourceGit.Models
                 }
             }
 
+            // Lane ownership above is resolved in head-recency order, which is unrelated to how
+            // branches actually nest. Now that every lane's ForkParent is known, re-sort the lanes
+            // so a child branch's lane sits next to its actual parent lane instead of wherever the
+            // resolution pass happened to place it.
+            ReorderLanesByHierarchy(lanes, ownedLaneByCommit);
+
             var pointsBySha = new Dictionary<string, List<CommitPoint>>(StringComparer.Ordinal);
             var assignedCommitLane = new bool[commits.Count];
 
@@ -890,6 +896,58 @@ namespace SourceGit.Models
             return NumericSort.Compare(GetBranchName(left), GetBranchName(right));
         }
 
+        private static void ReorderLanesByHierarchy(List<BranchLane> lanes, Dictionary<string, BranchLane> ownedLaneByCommit)
+        {
+            if (lanes.Count == 0)
+                return;
+
+            var root = lanes.Find(l => l.IsPrimary) ?? lanes[0];
+            var children = new Dictionary<BranchLane, List<BranchLane>>();
+
+            foreach (var lane in lanes)
+            {
+                if (lane == root)
+                    continue;
+
+                var parent = lane.ForkParent != null ? ownedLaneByCommit.GetValueOrDefault(lane.ForkParent) : null;
+                if (parent == null || parent == lane)
+                    parent = root;
+
+                if (!children.TryGetValue(parent, out var siblings))
+                {
+                    siblings = [];
+                    children[parent] = siblings;
+                }
+
+                siblings.Add(lane);
+            }
+
+            var ordered = new List<BranchLane>(lanes.Count);
+            var visited = new HashSet<BranchLane>();
+
+            void Visit(BranchLane lane)
+            {
+                if (!visited.Add(lane))
+                    return;
+
+                ordered.Add(lane);
+                if (children.TryGetValue(lane, out var kids))
+                {
+                    foreach (var kid in kids)
+                        Visit(kid);
+                }
+            }
+
+            Visit(root);
+            foreach (var lane in lanes)
+                Visit(lane);
+
+            lanes.Clear();
+            lanes.AddRange(ordered);
+            for (int i = 0; i < lanes.Count; i++)
+                lanes[i].LaneIndex = i;
+        }
+
         private static void BuildOwnedChain(
             BranchLane lane,
             Dictionary<string, Commit> commitBySha,
@@ -907,6 +965,12 @@ namespace SourceGit.Models
                 lane.Commits.Add(current);
                 if (commit.Parents.Count == 0)
                     break;
+
+                if (commit.Subject == BranchInit.CommitMessage)
+                {
+                    lane.ForkParent = commit.Parents[0];
+                    break;
+                }
 
                 var parent = commit.Parents[0];
                 if (!lane.IsPrimary && ShouldStopAtParent(parent, lane.Key, ownedLaneByCommit, branchHeads))
