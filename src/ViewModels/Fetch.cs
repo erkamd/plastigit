@@ -91,6 +91,8 @@ namespace SourceGit.ViewModels
                     .RunAsync();
             }
 
+            await FastForwardLocalBranchesAsync(log);
+
             log.Complete();
 
             if (navigateToUpstreamHEAD)
@@ -105,6 +107,27 @@ namespace SourceGit.ViewModels
 
             _repo.MarkFetched();
             return true;
+        }
+
+        private async Task FastForwardLocalBranchesAsync(CommandLog log)
+        {
+            var branches = await new Commands.QueryBranches(_repo.FullPath).GetResultAsync().ConfigureAwait(false);
+            var refreshed = false;
+
+            foreach (var b in branches)
+            {
+                if (!b.IsLocal || b.IsCurrent || b.IsUpstreamGone || string.IsNullOrEmpty(b.Upstream))
+                    continue;
+
+                if (b.Behind.Count == 0 || b.Ahead.Count > 0)
+                    continue;
+
+                if (await new Commands.Branch(_repo.FullPath, b.Name).Use(log).CreateAsync(b.Upstream, true).ConfigureAwait(false))
+                    refreshed = true;
+            }
+
+            if (refreshed)
+                _repo.RefreshBranches();
         }
 
         private readonly Repository _repo = null;
