@@ -810,6 +810,7 @@ namespace SourceGit.Views
             createBranch.Icon = this.CreateMenuIcon("Icons.Branch.Add");
             createBranch.Header = App.Text("CreateBranch");
             createBranch.Tag = OperatingSystem.IsMacOS() ? "⌘+⇧+B" : "Ctrl+Shift+B";
+            createBranch.IsEnabled = repo.HasGitUserSignature;
             createBranch.Click += (_, e) =>
             {
                 if (repo.CanCreatePopup())

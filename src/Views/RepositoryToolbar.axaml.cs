@@ -148,6 +148,7 @@ namespace SourceGit.Views
             if (DataContext is ViewModels.Repository repo)
             {
                 await this.ShowDialogAsync(new ViewModels.RepositoryConfigure(repo));
+                repo.RefreshAll();
                 e.Handled = true;
             }
         }

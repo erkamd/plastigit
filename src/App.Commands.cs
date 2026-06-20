@@ -43,6 +43,7 @@ namespace SourceGit
             {
                 var dialog = new Views.Preferences();
                 await dialog.ShowDialog(owner);
+                ViewModels.Launcher.RefreshOpenedRepositories();
             }
         });
 
