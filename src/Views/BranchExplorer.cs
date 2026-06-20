@@ -481,7 +481,7 @@ namespace SourceGit.Views
                         if (historiesView != null)
                         {
                             var branchKey = GetBranchKeyForLane(dot.Lane);
-                            historiesView.ShowContextMenuForCommit(commit, this, branchKey);
+                            _ = historiesView.ShowContextMenuForCommit(commit, this, branchKey);
                         }
                     }
 
