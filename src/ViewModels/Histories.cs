@@ -310,7 +310,10 @@ namespace SourceGit.ViewModels
                 if (lb == null || lb.Ahead.Count > 0)
                 {
                     if (_repo.CanCreatePopup())
-                        _repo.ShowPopup(new CreateBranch(_repo, rb));
+                    {
+                        var create = new CreateBranch(_repo, rb) { CheckoutAfterCreated = true, CreateInitialCommit = false };
+                        await create.Sure();
+                    }
                 }
                 else if (lb.Behind.Count > 0)
                 {
@@ -367,7 +370,10 @@ namespace SourceGit.ViewModels
             if (_repo.CanCreatePopup())
             {
                 if (firstRemoteBranch != null)
-                    _repo.ShowPopup(new CreateBranch(_repo, firstRemoteBranch));
+                {
+                    var create = new CreateBranch(_repo, firstRemoteBranch) { CheckoutAfterCreated = true, CreateInitialCommit = false };
+                    await create.Sure();
+                }
                 else if (!_repo.IsBare)
                 {
                     if (_repo.WorkingCopy is { CanSwitchBranchDirectly: true })

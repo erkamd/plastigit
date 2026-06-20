@@ -1479,7 +1479,7 @@ namespace SourceGit.ViewModels
                     }
                 }
 
-                var create = new CreateBranch(this, branch) { CheckoutAfterCreated = true };
+                var create = new CreateBranch(this, branch) { CheckoutAfterCreated = true, CreateInitialCommit = false };
                 await create.Sure();
             }
         }
