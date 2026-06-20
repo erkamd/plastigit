@@ -1479,7 +1479,8 @@ namespace SourceGit.ViewModels
                     }
                 }
 
-                ShowPopup(new CreateBranch(this, branch));
+                var create = new CreateBranch(this, branch) { CheckoutAfterCreated = true };
+                await create.Sure();
             }
         }
 
