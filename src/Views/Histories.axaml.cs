@@ -422,15 +422,20 @@ namespace SourceGit.Views
             base.OnDataContextChanged(e);
         }
 
-        public void ShowContextMenuForCommit(Models.Commit commit, Control target, string branchKey = null)
+        public async Task ShowContextMenuForCommit(Models.Commit commit, Control target, string branchKey = null)
         {
             var repoView = this.FindAncestorOfType<Repository>();
             if (repoView is not { DataContext: ViewModels.Repository repo })
                 return;
 
-            var menu = CreateContextMenuForSingleCommit(repo, commit, branchKey);
-            if (menu != null)
-                menu.Open(target);
+            var menu = CreateContextMenuForSingleCommit(repo, commit, branchKey, out var deleteValidationTask);
+            if (menu == null)
+                return;
+
+            // Wait for the "Delete commit" availability check to settle before showing the menu,
+            // so its enabled state can't flip while the menu is already open on screen.
+            await deleteValidationTask;
+            menu.Open(target);
         }
 
         public async Task DoubleTapCommit(Models.Commit commit)
@@ -752,8 +757,10 @@ namespace SourceGit.Views
             return menu;
         }
 
-        private ContextMenu CreateContextMenuForSingleCommit(ViewModels.Repository repo, Models.Commit commit, string branchKey = null)
+        private ContextMenu CreateContextMenuForSingleCommit(ViewModels.Repository repo, Models.Commit commit, string branchKey, out Task deleteValidationTask)
         {
+            deleteValidationTask = Task.CompletedTask;
+
             var current = repo.CurrentBranch;
             var vm = DataContext as ViewModels.Histories;
             if (current == null || vm == null)
@@ -1204,7 +1211,7 @@ namespace SourceGit.Views
             copy.Items.Add(copyCommitterTime);
             menu.Items.Add(copy);
 
-            return CreateFocusedCommitContextMenu(repo, current, commit, vm, branchKey, menu);
+            return CreateFocusedCommitContextMenu(repo, current, commit, vm, branchKey, menu, out deleteValidationTask);
         }
 
         private const double BranchExplorerDragPanThreshold = 4;
@@ -1219,8 +1226,10 @@ namespace SourceGit.Views
             Models.Commit commit,
             ViewModels.Histories vm,
             string branchKey,
-            ContextMenu advancedSource)
+            ContextMenu advancedSource,
+            out Task deleteValidationTask)
         {
+            deleteValidationTask = Task.CompletedTask;
             var menu = new ContextMenu();
 
             var goHere = new MenuItem();
@@ -1277,12 +1286,20 @@ namespace SourceGit.Views
             var deleteTarget = FindDeleteCommitTarget(repo, vm, commit, branchKey);
             deleteCommit.IsEnabled = false;
             if (deleteTarget != null)
-                _ = UpdateDeleteCommitAvailabilityAsync(repo, deleteTarget, deleteCommit);
+                deleteValidationTask = UpdateDeleteCommitAvailabilityAsync(repo, deleteTarget, deleteCommit);
 
             deleteCommit.Click += async (_, e) =>
             {
                 if (deleteTarget is { IsValidated: true })
-                    await DeleteBranchTipCommitAsync(repo, vm, deleteTarget);
+                {
+                    // Removing a branch's auto-generated init commit leaves it with no
+                    // commits of its own - delete the whole branch (synced both sides)
+                    // instead of resetting it to an empty state.
+                    if (commit.Subject == Models.BranchInit.CommitMessage)
+                        await DeleteEmptiedBranchAsync(repo, deleteTarget);
+                    else
+                        await DeleteBranchTipCommitAsync(repo, vm, deleteTarget);
+                }
 
                 e.Handled = true;
             };
@@ -1405,6 +1422,59 @@ namespace SourceGit.Views
             }
 
             return false;
+        }
+
+        private async Task DeleteEmptiedBranchAsync(ViewModels.Repository repo, DeleteCommitTarget target)
+        {
+            if (target is not { IsValidated: true } || !repo.CanCreatePopup())
+                return;
+
+            var validation = await ValidateDeleteCommitAsync(repo, target, true, true);
+            if (!validation.IsAllowed)
+            {
+                if (!string.IsNullOrEmpty(validation.Error))
+                    repo.SendNotification(validation.Error, true);
+                return;
+            }
+
+            var branch = repo.Branches.Find(x =>
+                x.IsLocal &&
+                x.FullName.Equals(target.Branch.FullName, StringComparison.Ordinal));
+            if (branch == null)
+                return;
+
+            // Can't delete the branch you're currently on - switch away first, to whatever
+            // branch already sits at the fork point, or detach onto it directly otherwise.
+            if (branch.IsCurrent && !repo.IsBare)
+            {
+                var destination = repo.Branches.Find(x =>
+                    x.IsLocal &&
+                    !x.FullName.Equals(branch.FullName, StringComparison.Ordinal) &&
+                    x.Head.Equals(target.ParentSHA, StringComparison.Ordinal));
+
+                var log = repo.CreateLog($"Switch away from '{branch.Name}' before deletion");
+                bool switched;
+                if (destination != null)
+                {
+                    switched = await new Commands.Checkout(repo.FullPath).Use(log).BranchAsync(destination.Name, false);
+                }
+                else
+                {
+                    switched = await new Commands.Checkout(repo.FullPath).Use(log).CommitAsync(target.ParentSHA, false);
+                }
+                log.Complete();
+
+                if (!switched)
+                {
+                    repo.SendNotification($"Failed to switch away from '{branch.Name}'. Branch deletion was cancelled.", true);
+                    return;
+                }
+
+                repo.MarkBranchesDirtyManually();
+                repo.MarkWorkingCopyDirtyManually();
+            }
+
+            repo.DeleteBranch(branch);
         }
 
         private async Task DeleteBranchTipCommitAsync(ViewModels.Repository repo, ViewModels.Histories vm, DeleteCommitTarget target)

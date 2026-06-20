@@ -204,9 +204,9 @@ namespace SourceGit.Views
 
             // 2. Draw anchors (commit dots)
             var dotFill = DotBrush;
-            var dotFillPen = new Pen(dotFill, 2);
             var grayedDotPen = new Pen(Brushes.Gray, 2.5);
             var selectionPen = new Pen(new SolidColorBrush(Color.Parse("#f6a500")), 3);
+            var headPen = new Pen(Brushes.Black, 2);
 
             foreach (var lane in Graph.Lanes)
             {
@@ -246,21 +246,18 @@ namespace SourceGit.Views
                     context.DrawEllipse(null, selectionPen, center, 10, 10);
 
                 var pen = dot.IsHighlighted ? Models.CommitGraph.Pens[dot.Color] : grayedDotPen;
-                switch (dot.Type)
-                {
-                    case Models.CommitGraph.DotType.Head:
-                        context.DrawEllipse(dot.IsOnRemote ? pen.Brush : dotFill, pen, center, 8, 8);
-                        break;
-                    case Models.CommitGraph.DotType.Merge:
-                        context.DrawEllipse(dot.IsOnRemote ? pen.Brush : dotFill, pen, center, 8, 8);
-                        var mergeMarkPen = dot.IsOnRemote ? dotFillPen : pen;
-                        context.DrawLine(mergeMarkPen, new Point(center.X, center.Y - 4), new Point(center.X, center.Y + 4));
-                        context.DrawLine(mergeMarkPen, new Point(center.X - 4, center.Y), new Point(center.X + 4, center.Y));
-                        break;
-                    default:
-                        context.DrawEllipse(dot.IsOnRemote ? pen.Brush : dotFill, pen, center, 5, 5);
-                        break;
-                }
+
+                // A branch's init commit is always rendered as a triangle, no matter if it's
+                // also the current Head (a marker can never be a Merge - it has one parent).
+                if (dot.IsInit)
+                    DrawTriangle(context, dot.IsOnRemote ? pen.Brush : dotFill, pen, center, 8);
+                else if (dot.Type == Models.CommitGraph.DotType.Merge)
+                    DrawSquare(context, pen.Brush, pen, center, 8);
+                else
+                    context.DrawEllipse(dot.IsOnRemote ? pen.Brush : dotFill, pen, center, 5, 5);
+
+                if (dot.IsCurrentHead)
+                    DrawCaret(context, headPen, new Point(center.X, center.Y + 16), 8);
             }
 
             foreach (var location in Graph.FastForwardBranchLocations)
@@ -484,7 +481,7 @@ namespace SourceGit.Views
                         if (historiesView != null)
                         {
                             var branchKey = GetBranchKeyForLane(dot.Lane);
-                            historiesView.ShowContextMenuForCommit(commit, this, branchKey);
+                            _ = historiesView.ShowContextMenuForCommit(commit, this, branchKey);
                         }
                     }
 
@@ -517,6 +514,40 @@ namespace SourceGit.Views
         private static Rect GetEmptyBranchMarkerRect(Point center)
         {
             return new Rect(center.X - 8, center.Y - 6, 16, 12);
+        }
+
+        private static void DrawTriangle(DrawingContext context, IBrush fill, Pen pen, Point center, double size)
+        {
+            var geo = new StreamGeometry();
+            using (var ctx = geo.Open())
+            {
+                ctx.BeginFigure(new Point(center.X - size * 0.5, center.Y - size * 0.87), true);
+                ctx.LineTo(new Point(center.X - size * 0.5, center.Y + size * 0.87));
+                ctx.LineTo(new Point(center.X + size, center.Y));
+                ctx.EndFigure(true);
+            }
+
+            context.DrawGeometry(fill, pen, geo);
+        }
+
+        private static void DrawSquare(DrawingContext context, IBrush fill, Pen pen, Point center, double size)
+        {
+            var half = size * 0.8;
+            var rect = new Rect(center.X - half, center.Y - half, half * 2, half * 2);
+            context.DrawRectangle(fill, pen, rect);
+        }
+
+        private static void DrawCaret(DrawingContext context, Pen pen, Point center, double size)
+        {
+            var geo = new StreamGeometry();
+            using (var ctx = geo.Open())
+            {
+                ctx.BeginFigure(new Point(center.X - size, center.Y + size * 0.5), false);
+                ctx.LineTo(new Point(center.X, center.Y - size * 0.5));
+                ctx.LineTo(new Point(center.X + size, center.Y + size * 0.5));
+            }
+
+            context.DrawGeometry(null, pen, geo);
         }
 
         private string GetBranchKeyForLane(int laneIndex)

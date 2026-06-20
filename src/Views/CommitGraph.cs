@@ -160,8 +160,8 @@ namespace SourceGit.Views
         private void DrawAnchors(DrawingContext context, Models.CommitGraph graph, double top, double bottom, double rowHeight)
         {
             var dotFill = DotBrush;
-            var dotFillPen = new Pen(dotFill, 2);
             var grayedPen = new Pen(Brushes.Gray, Models.CommitGraph.Pens[0].Thickness);
+            var headPen = new Pen(Brushes.Black, 2);
 
             foreach (var dot in graph.Dots)
             {
@@ -173,22 +173,53 @@ namespace SourceGit.Views
                     break;
 
                 var pen = dot.IsHighlighted ? Models.CommitGraph.Pens[dot.Color] : grayedPen;
-                switch (dot.Type)
-                {
-                    case Models.CommitGraph.DotType.Head:
-                        context.DrawEllipse(dotFill, pen, center, 6, 6);
-                        context.DrawEllipse(pen.Brush, null, center, 3, 3);
-                        break;
-                    case Models.CommitGraph.DotType.Merge:
-                        context.DrawEllipse(pen.Brush, null, center, 6, 6);
-                        context.DrawLine(dotFillPen, new Point(center.X, center.Y - 3), new Point(center.X, center.Y + 3));
-                        context.DrawLine(dotFillPen, new Point(center.X - 3, center.Y), new Point(center.X + 3, center.Y));
-                        break;
-                    default:
-                        context.DrawEllipse(dotFill, pen, center, 3, 3);
-                        break;
-                }
+
+                // A branch's init commit is always rendered as a triangle, no matter if it's
+                // also the current Head (a marker can never be a Merge - it has one parent).
+                if (dot.IsInit)
+                    DrawTriangle(context, dotFill, pen, center, 6);
+                else if (dot.Type == Models.CommitGraph.DotType.Merge)
+                    DrawSquare(context, dotFill, pen, center, 6);
+                else
+                    context.DrawEllipse(dotFill, pen, center, 3, 3);
+
+                if (dot.IsCurrentHead)
+                    DrawCaret(context, headPen, new Point(center.X, center.Y + 12), 6);
             }
+        }
+
+        private static void DrawTriangle(DrawingContext context, IBrush fill, Pen pen, Point center, double size)
+        {
+            var geo = new StreamGeometry();
+            using (var ctx = geo.Open())
+            {
+                ctx.BeginFigure(new Point(center.X - size * 0.5, center.Y - size * 0.87), true);
+                ctx.LineTo(new Point(center.X - size * 0.5, center.Y + size * 0.87));
+                ctx.LineTo(new Point(center.X + size, center.Y));
+                ctx.EndFigure(true);
+            }
+
+            context.DrawGeometry(fill, pen, geo);
+        }
+
+        private static void DrawSquare(DrawingContext context, IBrush fill, Pen pen, Point center, double size)
+        {
+            var half = size * 0.8;
+            var rect = new Rect(center.X - half, center.Y - half, half * 2, half * 2);
+            context.DrawRectangle(fill, pen, rect);
+        }
+
+        private static void DrawCaret(DrawingContext context, Pen pen, Point center, double size)
+        {
+            var geo = new StreamGeometry();
+            using (var ctx = geo.Open())
+            {
+                ctx.BeginFigure(new Point(center.X - size, center.Y + size * 0.5), false);
+                ctx.LineTo(new Point(center.X, center.Y - size * 0.5));
+                ctx.LineTo(new Point(center.X + size, center.Y + size * 0.5));
+            }
+
+            context.DrawGeometry(null, pen, geo);
         }
     }
 }

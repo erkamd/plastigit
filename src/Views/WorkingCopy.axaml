@@ -360,6 +360,7 @@
             <MultiBinding Converter="{x:Static BoolConverters.And}">
               <Binding Path="IsCommitting" Converter="{x:Static BoolConverters.Not}"/>
               <Binding Path="HasUnsolvedConflicts" Converter="{x:Static BoolConverters.Not}"/>
+              <Binding Path="IsCurrentBranchProtected" Converter="{x:Static BoolConverters.Not}"/>
             </MultiBinding>
           </SplitButton.IsEnabled>
           <SplitButton.Flyout>
@@ -399,6 +400,7 @@
             <MultiBinding Converter="{x:Static BoolConverters.And}">
               <Binding Path="IsCommitting" Converter="{x:Static BoolConverters.Not}"/>
               <Binding Path="CommitMessage" Converter="{x:Static c:StringConverters.IsNotNullOrWhitespace}"/>
+              <Binding Path="IsCurrentBranchProtected" Converter="{x:Static BoolConverters.Not}"/>
             </MultiBinding>
           </Button.IsEnabled>
         </Button>
@@ -439,6 +441,7 @@
             <MultiBinding Converter="{x:Static BoolConverters.And}">
               <Binding Path="IsCommitting" Converter="{x:Static BoolConverters.Not}"/>
               <Binding Path="CommitMessage" Converter="{x:Static c:StringConverters.IsNotNullOrWhitespace}"/>
+              <Binding Path="IsCurrentBranchProtected" Converter="{x:Static BoolConverters.Not}"/>
             </MultiBinding>
           </Button.IsEnabled>
         </Button>
@@ -458,6 +461,7 @@
             <MultiBinding Converter="{x:Static BoolConverters.And}">
               <Binding Path="IsCommitting" Converter="{x:Static BoolConverters.Not}"/>
               <Binding Path="CommitMessage" Converter="{x:Static c:StringConverters.IsNotNullOrWhitespace}"/>
+              <Binding Path="IsCurrentBranchProtected" Converter="{x:Static BoolConverters.Not}"/>
             </MultiBinding>
           </Button.IsEnabled>
 

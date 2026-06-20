@@ -369,7 +369,12 @@ namespace SourceGit.ViewModels
                 if (firstRemoteBranch != null)
                     _repo.ShowPopup(new CreateBranch(_repo, firstRemoteBranch));
                 else if (!_repo.IsBare)
-                    _repo.ShowPopup(new CheckoutCommit(_repo, commit));
+                {
+                    if (_repo.WorkingCopy is { CanSwitchBranchDirectly: true })
+                        await _repo.ShowAndStartPopupAsync(new CheckoutCommit(_repo, commit));
+                    else
+                        _repo.ShowPopup(new CheckoutCommit(_repo, commit));
+                }
             }
         }
 

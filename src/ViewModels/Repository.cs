@@ -165,6 +165,7 @@ namespace SourceGit.ViewModels
                     _histories?.NotifyCurrentBranchChanged();
                     if (value != null && !value.Head.Equals(oldHead, StringComparison.Ordinal) && _workingCopy is { UseAmend: true })
                         _workingCopy.UseAmend = false;
+                    _workingCopy?.NotifyCurrentBranchChanged();
                 }
             }
         }
@@ -416,6 +417,18 @@ namespace SourceGit.ViewModels
         {
             get => _isAutoFetching;
             private set => SetProperty(ref _isAutoFetching, value);
+        }
+
+        public bool IsAutoSyncEnabled
+        {
+            get => Preferences.Instance.EnableAutoFetch && Preferences.Instance.EnableAutoPush;
+            set
+            {
+                Preferences.Instance.EnableAutoFetch = value;
+                Preferences.Instance.EnableAutoPush = value;
+                Preferences.Instance.Save();
+                OnPropertyChanged();
+            }
         }
 
         public AvaloniaList<Models.IssueTracker> IssueTrackers
@@ -1489,6 +1502,62 @@ namespace SourceGit.ViewModels
                 ShowPopup(new DeleteMultipleBranches(this, branches, isLocal));
         }
 
+        // Keeps a branch's remote in sync: pushes immediately after every commit, setting
+        // upstream to the default remote on first push if none exists yet.
+        public async Task SilentPushBranchAsync(Models.Branch branch, CommandLog log)
+        {
+            if (!Preferences.Instance.EnableAutoPush || IsBare || _remotes.Count == 0 || branch is null or { IsDetachedHead: true })
+                return;
+
+            string remoteName;
+            string remoteBranchName;
+            var setTracking = false;
+
+            if (!string.IsNullOrEmpty(branch.Upstream) && !branch.IsUpstreamGone)
+            {
+                var upstream = _branches.Find(x => !x.IsLocal && x.FullName == branch.Upstream);
+                if (upstream == null)
+                    return;
+
+                remoteName = upstream.Remote;
+                remoteBranchName = upstream.Name;
+            }
+            else
+            {
+                remoteName = !string.IsNullOrEmpty(_settings.DefaultRemote) && _remotes.Exists(x => x.Name == _settings.DefaultRemote)
+                    ? _settings.DefaultRemote
+                    : _remotes[0].Name;
+                remoteBranchName = branch.Name;
+                setTracking = true;
+            }
+
+            var succ = await new Commands.Push(FullPath, branch.Name, remoteName, remoteBranchName, false, _submodules.Count > 0, setTracking, false)
+                .Use(log)
+                .RunAsync();
+
+            if (succ && setTracking)
+                branch.Upstream = $"refs/remotes/{remoteName}/{remoteBranchName}";
+        }
+
+        // Deletes a remote branch, used to keep local/remote branches in sync on delete.
+        public async Task DeleteRemoteBranchAsync(Models.Branch remoteBranch, CommandLog log)
+        {
+            var exists = await new Commands.Remote(FullPath)
+                .HasBranchAsync(remoteBranch.Remote, remoteBranch.Name)
+                .ConfigureAwait(false);
+
+            if (exists)
+                await new Commands.Push(FullPath, remoteBranch.Remote, $"refs/heads/{remoteBranch.Name}", true)
+                    .Use(log)
+                    .RunAsync()
+                    .ConfigureAwait(false);
+            else
+                await new Commands.Branch(FullPath, remoteBranch.Name)
+                    .Use(log)
+                    .DeleteRemoteAsync(remoteBranch.Remote)
+                    .ConfigureAwait(false);
+        }
+
         private List<Models.Branch> FindUnnecessaryLocalBranches()
         {
             var commits = _histories?.Commits;
@@ -1497,11 +1566,14 @@ namespace SourceGit.ViewModels
 
             var unnecessary = new List<Models.Branch>();
             var branchesWithoutOwnedCommits = Models.CommitGraph.FindBranchesWithoutOwnedCommits(commits, _branches);
-            foreach (var candidate in branchesWithoutOwnedCommits)
+            foreach (var candidate in _branches)
             {
                 if (candidate is not { IsLocal: true, IsDetachedHead: false } ||
                     candidate.IsCurrent ||
                     IsProtectedBranch(candidate))
+                    continue;
+
+                if (!branchesWithoutOwnedCommits.Contains(candidate))
                     continue;
 
                 unnecessary.Add(candidate);
@@ -1584,6 +1656,11 @@ namespace SourceGit.ViewModels
         {
             if (CanCreatePopup())
                 ShowPopup(new DeleteRemote(this, remote));
+        }
+
+        public void ToggleAutoSync()
+        {
+            IsAutoSyncEnabled = !IsAutoSyncEnabled;
         }
 
         public async Task ToggleAutoFetchOnRemoteAsync(Models.Remote remote)

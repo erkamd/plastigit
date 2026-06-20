@@ -68,6 +68,16 @@ namespace SourceGit.ViewModels
             private set => SetProperty(ref _isCommitting, value);
         }
 
+        public bool IsCurrentBranchProtected
+        {
+            get => _repo.CurrentBranch != null && _repo.IsProtectedBranch(_repo.CurrentBranch);
+        }
+
+        public void NotifyCurrentBranchChanged()
+        {
+            OnPropertyChanged(nameof(IsCurrentBranchProtected));
+        }
+
         public bool EnableSignOff
         {
             get => _repo.UIStates.EnableSignOffForCommit;
@@ -512,8 +522,13 @@ namespace SourceGit.ViewModels
                 if (File.Exists(mergeMsgFile) && !string.IsNullOrWhiteSpace(_commitMessage))
                     await File.WriteAllTextAsync(mergeMsgFile, _commitMessage);
 
+                var wasMerging = _inProgressContext is MergeInProgress;
                 var log = _repo.CreateLog($"Continue {_inProgressContext.Name}");
                 await _inProgressContext.ContinueAsync(log);
+
+                if (wasMerging && !File.Exists(Path.Combine(_repo.GitDir, "MERGE_HEAD")))
+                    await _repo.SilentPushBranchAsync(_repo.CurrentBranch, log);
+
                 log.Complete();
 
                 CommitMessage = string.Empty;
@@ -577,7 +592,7 @@ namespace SourceGit.ViewModels
                 _repo.Settings.CommitMessages.Clear();
         }
 
-        public async Task CommitAsync(bool autoStage, bool autoPush)
+        public async Task CommitAsync(bool autoStage)
         {
             if (string.IsNullOrWhiteSpace(_commitMessage))
                 return;
@@ -585,6 +600,12 @@ namespace SourceGit.ViewModels
             if (!_repo.CanCreatePopup())
             {
                 _repo.SendNotification("Repository has an unfinished job! Please wait!", true);
+                return;
+            }
+
+            if (IsCurrentBranchProtected)
+            {
+                _repo.SendNotification($"'{_repo.CurrentBranch.Name}' is a protected branch! Create a new branch and merge it back instead of committing directly.", true);
                 return;
             }
 
@@ -633,7 +654,7 @@ namespace SourceGit.ViewModels
                 await StageChangesAsync(_unstaged, null);
 
             var log = _repo.CreateLog("Commit");
-            var succ = await new Commands.Commit(_repo.FullPath, _commitMessage, _repo.CurrentBranch?.Name, EnableSignOff, NoVerifyOnCommit, _useAmend, _resetAuthor)
+            var succ = await new Commands.Commit(_repo.FullPath, _commitMessage, EnableSignOff, NoVerifyOnCommit, _useAmend, _resetAuthor)
                     .Use(log)
                     .RunAsync();
 
@@ -644,18 +665,9 @@ namespace SourceGit.ViewModels
                 UseAmend = false;
                 CommitMessage = string.Empty;
 
-                if (autoPush && _repo.Remotes.Count > 0)
-                {
-                    Models.Branch pushBranch = null;
-                    if (_repo.CurrentBranch == null)
-                    {
-                        var currentBranchName = await new Commands.QueryCurrentBranch(_repo.FullPath).GetResultAsync();
-                        pushBranch = new Models.Branch() { Name = currentBranchName };
-                    }
-
-                    if (_repo.CanCreatePopup())
-                        await _repo.ShowAndStartPopupAsync(new Push(_repo, pushBranch));
-                }
+                var pushLog = _repo.CreateLog("Push");
+                await _repo.SilentPushBranchAsync(_repo.CurrentBranch, pushLog);
+                pushLog.Complete();
             }
 
             _repo.MarkBranchesDirtyManually();
@@ -738,23 +750,36 @@ namespace SourceGit.ViewModels
 
                 if (succ)
                 {
+                    // Same as a plain "Create Branch": give the new branch its own generic
+                    // init commit first, then make the user's real commit on top of it.
+                    var initSha = await new Commands.CreateEmptyCommitOnRef(_repo.FullPath)
+                        .Use(log)
+                        .RunAsync(created.FullName, baseRevision, Models.BranchInit.CommitMessage);
+                    succ = !string.IsNullOrEmpty(initSha);
+
+                    if (succ)
+                        created.Head = initSha;
+                }
+
+                if (succ)
+                {
                     _repo.RefreshAfterCreateBranch(created, true);
-                    succ = await new Commands.Commit(_repo.FullPath, _commitMessage, branchName, EnableSignOff, NoVerifyOnCommit, false, false)
+                    succ = await new Commands.Commit(_repo.FullPath, _commitMessage, EnableSignOff, NoVerifyOnCommit, false, false)
                         .Use(log)
                         .RunAsync();
                 }
 
-                log.Complete();
-
                 if (succ)
                 {
                     CommitMessage = string.Empty;
+                    await _repo.SilentPushBranchAsync(_repo.CurrentBranch, log);
                 }
                 else
                 {
                     _repo.MarkWorkingCopyDirtyManually();
                 }
 
+                log.Complete();
                 _repo.MarkBranchesDirtyManually();
             }
             finally
