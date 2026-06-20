@@ -27,6 +27,17 @@ namespace SourceGit.Views
             e.Handled = true;
         }
 
+        private async void OnFixUserSignature(object _, PointerPressedEventArgs e)
+        {
+            if (DataContext is ViewModels.Repository repo)
+            {
+                await this.ShowDialogAsync(new ViewModels.RepositoryConfigure(repo));
+                repo.RefreshAll();
+            }
+
+            e.Handled = true;
+        }
+
         private void OnSearchCommitPanelPropertyChanged(object sender, AvaloniaPropertyChangedEventArgs e)
         {
             if (e.Property == IsVisibleProperty && sender is Grid { IsVisible: true })

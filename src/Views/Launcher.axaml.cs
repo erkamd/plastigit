@@ -160,6 +160,7 @@ namespace SourceGit.Views
                 if (e is { KeyModifiers: KeyModifiers.Control, Key: Key.OemComma })
                 {
                     await this.ShowDialogAsync(new Preferences());
+                    ViewModels.Launcher.RefreshOpenedRepositories();
                     e.Handled = true;
                     return;
                 }

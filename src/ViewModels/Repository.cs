@@ -56,6 +56,12 @@ namespace SourceGit.ViewModels
             get => _hasAllowedSignersFile;
         }
 
+        public bool HasGitUserSignature
+        {
+            get => _hasGitUserSignature;
+            private set => SetProperty(ref _hasGitUserSignature, value);
+        }
+
         public int SelectedViewIndex
         {
             get => _selectedViewIndex;
@@ -667,6 +673,10 @@ namespace SourceGit.ViewModels
 
                 var config = await new Commands.Config(FullPath).ReadAllAsync().ConfigureAwait(false);
                 _hasAllowedSignersFile = config.TryGetValue("gpg.ssh.allowedsignersfile", out var allowedSignersFile) && !string.IsNullOrEmpty(allowedSignersFile);
+
+                var hasUserName = config.TryGetValue("user.name", out var userName) && !string.IsNullOrWhiteSpace(userName);
+                var hasUserEmail = config.TryGetValue("user.email", out var userEmail) && !string.IsNullOrWhiteSpace(userEmail);
+                Dispatcher.UIThread.Post(() => HasGitUserSignature = hasUserName && hasUserEmail);
 
                 if (config.TryGetValue("gitflow.branch.master", out var masterName))
                     GitFlow.Master = masterName;
@@ -1427,6 +1437,12 @@ namespace SourceGit.ViewModels
 
         public void CreateNewBranch()
         {
+            if (!HasGitUserSignature)
+            {
+                SendNotification(App.Text("Repository.MissingUserSignature"), true);
+                return;
+            }
+
             if (_currentBranch == null)
             {
                 SendNotification("Git cannot create a branch before your first commit.", true);
@@ -2094,6 +2110,7 @@ namespace SourceGit.ViewModels
         private Models.RepositoryUIStates _uiStates = null;
         private Models.FilterMode _historyFilterMode = Models.FilterMode.None;
         private bool _hasAllowedSignersFile = false;
+        private bool _hasGitUserSignature = true;
         private ulong _queryLocalChangesTimes = 0;
 
         private Models.Watcher _watcher = null;

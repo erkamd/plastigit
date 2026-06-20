@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 
 using Avalonia.Collections;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -43,6 +44,24 @@ namespace SourceGit.ViewModels
         {
             get => _commandPalette;
             set => SetProperty(ref _commandPalette, value);
+        }
+
+        public static void RefreshOpenedRepositories()
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime { Windows: { } windows })
+                return;
+
+            foreach (var window in windows)
+            {
+                if (window.DataContext is not Launcher launcher)
+                    continue;
+
+                foreach (var page in launcher.Pages)
+                {
+                    if (page.Data is Repository repo)
+                        repo.RefreshAll();
+                }
+            }
         }
 
         public Launcher(string startupRepo)
