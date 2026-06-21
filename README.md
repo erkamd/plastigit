@@ -2,14 +2,17 @@
 
 A personal fork of [sourcegit-scm/sourcegit](https://github.com/sourcegit-scm/sourcegit), a cross-platform Git GUI client. Licensed under the same [MIT License](LICENSE) as upstream. Not affiliated with or endorsed by the original SourceGit project — for the official app, releases, and documentation, go to the [upstream repository](https://github.com/sourcegit-scm/sourcegit).
 
-## What's different from upstream
+## Screenshot
 
-* **Branch ownership tags on commits** — commits made through this app are tagged with the branch they were created on (stored as a `(#branch-name)` prefix in the commit subject, parsed back out via `Models.Commit.BranchTag`). Used to resolve which branch a commit logically belongs to even after merges/rebases, fixing branch-resolution glitches in the commit graph.
-* **Branch creation safety checks**:
-  * Warns and blocks branch creation if `user.name`/`user.email` aren't configured in git, with a one-click fix link, instead of silently failing.
-  * New branches checked out from a remote-tracking branch (e.g. via the "Local Branches" quick actions) no longer get an unwanted automatic empty initial commit.
-* **Fetch auto-fast-forwards local branches** — after a fetch, any local branch that's purely behind its upstream (no unpushed commits of its own) is fast-forwarded automatically, instead of staying stale until manually checked out and pulled.
-* **More reliable "Delete commit" menu item** — the context menu now waits for the delete-availability check to finish before opening, so the enabled state can't flip after the menu is already on screen.
+![PlastiGit](./screenshots/Plastigit.png)
+
+## Features
+
+* **Plastic SCM style visualization** — the commit graph is laid out closer to how Plastic SCM presents history, rather than git's default graph style.
+* **Every branch is clearly separated** — branch lanes are visually distinct, making it easy to tell at a glance which commits belong to which branch.
+* **Auto-sync** — your local and remote branches are kept in sync automatically as you commit or fetch, instead of requiring a manual push/pull every time.
+* **Simplified menus** — git's more obscure/rarely-needed actions are trimmed from the UI, keeping the menus focused on what you actually use.
+* **Protected main branch** — direct commits to main branches are disallowed; changes must be merged in from a sub-branch.
 
 ## Building
 
